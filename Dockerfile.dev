@@ -1,0 +1,6 @@
+FROM node:20-alpine
+WORKDIR /app
+EXPOSE 3131
+ENV PORT=3131
+ENV HOSTNAME="0.0.0.0"
+CMD ["sh", "-c", "npm install && npm run dev"]
