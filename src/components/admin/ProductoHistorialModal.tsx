@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { X, Loader2, TrendingUp, TrendingDown, Minus, DollarSign, ArrowUpDown } from 'lucide-react'
+import { X, Loader2, TrendingUp, TrendingDown, Minus, DollarSign, ArrowUpDown, RefreshCw } from 'lucide-react'
 import api from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 
@@ -53,6 +53,21 @@ const ORIGEN_LABEL: Record<string, string> = {
   NONE: '—',
 }
 
+interface ScraperLogRow {
+  fecha: string
+  trigger: string
+  resultado: string // updated | skipped | failed
+  pvp_anterior: number | null
+  pvp_traido: number | null
+  detalle: string | null
+}
+
+const RESULTADO_BADGE: Record<string, { label: string; cls: string }> = {
+  updated: { label: 'Actualizado', cls: 'bg-green-50 text-green-700' },
+  skipped: { label: 'Sin cambios', cls: 'bg-blue-50 text-blue-700' },
+  failed: { label: 'Fallido', cls: 'bg-red-50 text-red-700' },
+}
+
 function VariacionBadge({ v }: { v: number | null }) {
   if (v == null) return <span className="text-gray-300">—</span>
   const up = v > 0
@@ -78,25 +93,29 @@ export default function ProductoHistorialModal({
   producto: HistorialProducto
   onClose: () => void
 }) {
-  const [tab, setTab] = useState<'pvp' | 'stock'>('pvp')
+  const [tab, setTab] = useState<'pvp' | 'stock' | 'scraper'>('pvp')
   const [pvpRows, setPvpRows] = useState<PvpRow[]>([])
   const [stockRows, setStockRows] = useState<MovimientoRow[]>([])
+  const [scraperLog, setScraperLog] = useState<ScraperLogRow[]>([])
   const [loading, setLoading] = useState(true)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [pvpRes, stockRes] = await Promise.all([
+      const [pvpRes, stockRes, logRes] = await Promise.all([
         api.get('/reportes/historial-pvp', { params: { search: producto.codigo } }),
         api.get('/movimientos-stock', { params: { producto_id: producto.id, page_size: 100 } }),
+        api.get(`/scraper/producto/${producto.id}/log`, { params: { limit: 100 } }).catch(() => ({ data: [] })),
       ])
       const match = (pvpRes.data as { producto_id: number; historial: PvpRow[] }[])
         .find((p) => p.producto_id === producto.id)
       setPvpRows(match?.historial ?? [])
       setStockRows((stockRes.data?.items ?? []) as MovimientoRow[])
+      setScraperLog((logRes.data ?? []) as ScraperLogRow[])
     } catch {
       setPvpRows([])
       setStockRows([])
+      setScraperLog([])
     } finally {
       setLoading(false)
     }
@@ -134,6 +153,7 @@ export default function ProductoHistorialModal({
         <div className="flex gap-1 border-b border-gray-100 px-4">
           {([
             { key: 'pvp', label: 'Precios (PVP)', icon: DollarSign },
+            { key: 'scraper', label: 'Scraper (log)', icon: RefreshCw },
             { key: 'stock', label: 'Movimientos de stock', icon: ArrowUpDown },
           ] as const).map((t) => {
             const active = tab === t.key
@@ -197,7 +217,7 @@ export default function ProductoHistorialModal({
                 </table>
               )}
             </>
-          ) : (
+          ) : tab === 'stock' ? (
             <>
               <p className="mb-3 text-xs text-gray-400">
                 Movimientos de stock (transferencias, fraccionamientos y ajustes). Más reciente primero.
@@ -233,6 +253,45 @@ export default function ProductoHistorialModal({
                         <td className="px-3 py-2 text-gray-500">{m.usuario_nombre || 'Sistema'}</td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="mb-3 text-xs text-gray-400">
+                Registro del scraper: cada verificación del PVP en alfabeta.net, aunque el precio no haya cambiado. Más reciente primero.
+              </p>
+              {scraperLog.length === 0 ? (
+                <div className="py-16 text-center text-sm text-gray-400">Todavía no hay verificaciones del scraper para este producto.</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50/60">
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Fecha</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Origen</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Resultado</th>
+                      <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">PVP traído</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scraperLog.map((r, i) => {
+                      const rb = RESULTADO_BADGE[r.resultado] || { label: r.resultado, cls: 'bg-gray-100 text-gray-600' }
+                      return (
+                        <tr key={i} className="border-b border-gray-50 hover:bg-gray-50/50" title={r.detalle || undefined}>
+                          <td className="px-3 py-2 text-gray-600">{fmtFechaHora(r.fecha)}</td>
+                          <td className="px-3 py-2">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${r.trigger === 'scheduled' ? 'bg-[#003087]/5 text-[#003087]' : 'bg-teal-50 text-teal-700'}`}>
+                              {r.trigger === 'scheduled' ? 'Automático' : 'Manual'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${rb.cls}`}>{rb.label}</span>
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold text-gray-900 tabular-nums">{r.pvp_traido != null ? formatCurrency(r.pvp_traido) : '—'}</td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               )}
