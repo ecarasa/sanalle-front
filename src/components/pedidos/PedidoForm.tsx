@@ -704,7 +704,7 @@ export default function PedidoForm({
             </select>
           </div>
 
-          {/* Fecha Compromiso Pago */}
+          {/* --- OCULTO (revivir): Compromiso de Pago — pedidos sin pagos por ahora. Ver docs/OCULTO_PARA_REVIVIR.md ---
           <div>
             <DatePicker
               value={fechaCompromisoPago}
@@ -723,6 +723,7 @@ export default function PedidoForm({
               </DateInput>
             </DatePicker>
           </div>
+          --- FIN OCULTO --- */}
 
           {/* Despachado */}
           <div className="flex items-center gap-3 pt-5">

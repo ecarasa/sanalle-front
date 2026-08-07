@@ -31,8 +31,8 @@ export default function SalesChart({ data, title, type = 'line', color = '#00308
   const formatCurrency = (value: number) => `$ ${value.toLocaleString('es-AR')}`
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-      <h3 className="text-sm font-semibold text-gray-700 mb-4">{title}</h3>
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-200/60 p-5">
+      <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-4 before:h-4 before:w-1 before:rounded-full before:bg-gradient-to-b before:from-[#00AEEF] before:to-[#003087] before:content-['']">{title}</h3>
       <ResponsiveContainer width="100%" height={280}>
         {type === 'area' ? (
           <AreaChart data={formattedData}>

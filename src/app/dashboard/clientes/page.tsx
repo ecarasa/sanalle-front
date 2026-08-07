@@ -110,6 +110,7 @@ export default function ClientesPage() {
         return <span className={`inline-block w-4 h-4 rounded-full ${colors[value] || 'bg-gray-300'}`} title={tooltip} />
       },
     },
+    /* --- OCULTO (revivir): columnas Remitos / Facturas / Deuda. Ver docs/OCULTO_PARA_REVIVIR.md ---
     {
       key: 'saldo_remitos',
       label: 'Remitos por Cobrar',
@@ -140,6 +141,7 @@ export default function ClientesPage() {
         </span>
       ),
     },
+    --- FIN OCULTO --- */
     {
       key: 'acciones',
       label: 'Acciones',

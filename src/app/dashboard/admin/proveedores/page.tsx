@@ -446,6 +446,11 @@ function PagoProveedorPanel({
 // Page
 // ---------------------------------------------------------------------------
 
+// Filas expandibles (panel de pago/deuda a proveedores + notas) desactivadas por
+// ahora para que el listado quede como los demás. Poner en true para revivirlas.
+// Ver docs/OCULTO_PARA_REVIVIR.md
+const PROVEEDOR_EXPAND_ENABLED = false
+
 export default function AdminProveedoresPage() {
   useAuth()
   const [search, setSearch] = useState('')
@@ -502,7 +507,7 @@ export default function AdminProveedoresPage() {
   }
 
   const columns = useMemo(() => [
-    {
+    ...(PROVEEDOR_EXPAND_ENABLED ? [{
       key: 'expand',
       label: '',
       sortable: false,
@@ -517,7 +522,7 @@ export default function AdminProveedoresPage() {
             : <ChevronDown className="w-4 h-4 text-gray-400" />}
         </button>
       ),
-    },
+    }] : []),
     {
       key: 'nombre',
       label: 'Proveedor',
@@ -558,6 +563,7 @@ export default function AdminProveedoresPage() {
         </div>
       ),
     },
+    /* --- OCULTO (revivir): columna Saldo Pendiente (deuda con el proveedor). Ver docs/OCULTO_PARA_REVIVIR.md ---
     {
       key: 'saldo_pendiente_total',
       label: 'Saldo Pendiente',
@@ -571,6 +577,7 @@ export default function AdminProveedoresPage() {
         </div>
       ),
     },
+    --- FIN OCULTO --- */
     {
       key: 'activo',
       label: 'Estado',
@@ -612,8 +619,13 @@ export default function AdminProveedoresPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Proveedores</h1>
-          <p className="text-sm text-gray-500 mt-1">Gestión de laboratorios y droguerías</p>
+          <div className="flex items-center gap-3.5">
+            <div className="h-11 w-1.5 flex-shrink-0 rounded-full bg-gradient-to-b from-[#00AEEF] to-[#003087]" />
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900">Proveedores</h1>
+              <p className="mt-0.5 text-sm text-gray-500">Gestión de laboratorios y droguerías</p>
+            </div>
+          </div>
         </div>
         <button
           onClick={openCreate}
@@ -648,7 +660,7 @@ export default function AdminProveedoresPage() {
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
         searchPlaceholder="Buscar proveedor por nombre..."
-        renderCustomRow={(row: Proveedor) =>
+        renderCustomRow={PROVEEDOR_EXPAND_ENABLED ? ((row: Proveedor) =>
           expandedRow === row.id ? (
             <tr key={`expanded-${row.id}`} className="bg-gray-50/50">
               <td colSpan={columns.length} className="px-6 py-4 border-t border-gray-100">
@@ -731,7 +743,7 @@ export default function AdminProveedoresPage() {
               </td>
             </tr>
           ) : null
-        }
+        ) : undefined}
       />
 
       <ProveedorModal

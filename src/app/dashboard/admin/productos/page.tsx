@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Plus, Pencil, Trash2, X, Loader2, ArrowUpDown, Upload, CheckCircle2, AlertTriangle, DollarSign, Download, FileSpreadsheet, Webcam } from 'lucide-react'
+import { Plus, Pencil, Trash2, X, Loader2, ArrowUpDown, Upload, CheckCircle2, AlertTriangle, DollarSign, Download, FileSpreadsheet, Webcam, History, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
@@ -10,6 +10,8 @@ import { useFeatureFlags } from '@/hooks/useFeatureFlags'
 import { useDebounce } from '@/hooks/useDebounce'
 import DataGrid from '@/components/grilla/DataGrid'
 import ProductoModal from '@/components/admin/ProductoModal'
+import ProductoHistorialModal from '@/components/admin/ProductoHistorialModal'
+import ScraperLogsModal from '@/components/admin/ScraperLogsModal'
 import { listasDe, MargenField } from '@/lib/listas'
 import { Producto, PaginatedResponse, Proveedor, Laboratorio } from '@/types'
 
@@ -21,25 +23,45 @@ const MARGEN_CAMPOS: MargenField[] = ['margen_minorista', 'margen_mayorista', ..
 
 const esMargen = (campo: BulkPriceCampo): campo is MargenField => (MARGEN_CAMPOS as string[]).includes(campo)
 
-function StockPoolBadge({ cajas, blisters, label, color }: { cajas: number; blisters: number; label: string; color: 'blue' | 'slate' }) {
+type StockDep = { deposito_id: number; nombre: string; orden: number; activo: boolean; cajas: number; blisters: number }
+
+const DEPO_BADGE_COLORS = [
+  'bg-blue-50 text-blue-700 border-blue-200',
+  'bg-slate-100 text-slate-700 border-slate-200',
+  'bg-teal-50 text-teal-700 border-teal-200',
+  'bg-amber-50 text-amber-700 border-amber-200',
+  'bg-purple-50 text-purple-700 border-purple-200',
+  'bg-rose-50 text-rose-700 border-rose-200',
+]
+
+function StockDepBadge({ nombre, cajas, blisters, idx }: { nombre: string; cajas: number; blisters: number; idx: number }) {
   const total = cajas + blisters / 100
-  const colorMap = {
-    blue: total > 0 ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-gray-50 text-gray-400 border-gray-200',
-    slate: total > 0 ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-gray-50 text-gray-400 border-gray-200',
-  }
+  const cls = total > 0 ? DEPO_BADGE_COLORS[idx % DEPO_BADGE_COLORS.length] : 'bg-gray-50 text-gray-400 border-gray-200'
+  const short = (nombre || '?').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 3).toUpperCase() || '?'
   return (
-    <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-medium ${colorMap[color]}`}>
-      <span className="font-bold">{label}</span>
+    <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-medium ${cls}`} title={nombre}>
+      <span className="font-bold">{short}</span>
       <span>{cajas}cj{blisters > 0 ? ` +${blisters}bl` : ''}</span>
     </div>
   )
 }
 
 function DualStockCell({ row }: { row: Producto }) {
+  const stocks = (row as Producto & { stocks?: StockDep[] }).stocks
+  if (stocks && stocks.length > 0) {
+    return (
+      <div className="flex flex-col gap-0.5">
+        {stocks.map((s, i) => (
+          <StockDepBadge key={s.deposito_id} nombre={s.nombre} cajas={s.cajas} blisters={s.blisters} idx={i} />
+        ))}
+      </div>
+    )
+  }
+  // Fallback a A/B (por si un producto aún no tiene filas por depósito)
   return (
     <div className="flex flex-col gap-0.5">
-      <StockPoolBadge cajas={row.stock_a_cajas} blisters={row.stock_a_blisters} label="A" color="blue" />
-      <StockPoolBadge cajas={row.stock_b_cajas} blisters={row.stock_b_blisters} label="B" color="slate" />
+      <StockDepBadge nombre="Sanalle" cajas={row.stock_a_cajas} blisters={row.stock_a_blisters} idx={0} />
+      <StockDepBadge nombre="Farmacare" cajas={row.stock_b_cajas} blisters={row.stock_b_blisters} idx={1} />
     </div>
   )
 }
@@ -49,7 +71,9 @@ export default function AdminProductosPage() {
   const { user } = useAuth()
   const { isEnabled } = useFeatureFlags()
   // Pestaña "Ajuste" (+/-) gobernada por feature flag; super_admin siempre la ve
-  const canManualAdjust = user?.rol === 'super_admin' || isEnabled('ajuste_stock_manual')
+  // Ajuste manual de stock (+/-, sin venta ni compra): habilitado para admin y
+  // super_admin. Otros roles pueden habilitarse con el flag ajuste_stock_manual.
+  const canManualAdjust = user?.rol === 'super_admin' || user?.rol === 'admin' || isEnabled('ajuste_stock_manual')
   const stockOps: Array<'transfer' | 'fraction' | 'manual'> = canManualAdjust
     ? ['transfer', 'fraction', 'manual']
     : ['transfer', 'fraction']
@@ -75,9 +99,15 @@ export default function AdminProductosPage() {
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ created: number; updated: number; skipped: number; errors: string[] } | null>(null)
 
+  const [historialProducto, setHistorialProducto] = useState<Producto | null>(null)
+  const [scrapeLoading, setScrapeLoading] = useState(false)
+  const [scraperLogsOpen, setScraperLogsOpen] = useState(false)
+
   const [stockModal, setStockModal] = useState<Producto | null>(null)
   const [stockAdjustOp, setStockAdjustOp] = useState<'transfer' | 'fraction' | 'manual'>('transfer')
   const [stockAdjustPool, setStockAdjustPool] = useState<'a' | 'b'>('a')
+  const [depositos, setDepositos] = useState<{ id: number; nombre: string }[]>([])
+  const [stockAdjustDepositoId, setStockAdjustDepositoId] = useState<number | null>(null)
   const [stockAdjustTarget, setStockAdjustTarget] = useState<'a' | 'b'>('b')
   const [stockAdjustCajas, setStockAdjustCajas] = useState('')
   const [stockAdjustBlisters, setStockAdjustBlisters] = useState('')
@@ -99,22 +129,41 @@ export default function AdminProductosPage() {
   // Master data options for dropdowns
   const [proveedores, setProveedores] = useState<Proveedor[]>([])
   const [laboratorios, setLaboratorios] = useState<Laboratorio[]>([])
+  const [loadingOptions, setLoadingOptions] = useState(true)
 
   const debouncedSearch = useDebounce(search, 400)
 
-  // Fetch master data for dropdowns
+  // Depósitos para el selector del ajuste de stock
   useEffect(() => {
-    const fetchOptions = async () => {
-      try {
-        const pRes = await api.get<PaginatedResponse<Proveedor>>('/proveedores', { params: { page_size: 1000 } })
-        setProveedores(pRes.data.items)
-        const lRes = await api.get<PaginatedResponse<Laboratorio>>('/laboratorios', { params: { page_size: 1000 } })
-        setLaboratorios(lRes.data.items)
-      } catch {
-        // Options will just be empty, forms still work
+    api.get('/depositos').then((r) => {
+      const deps = (r.data ?? []) as { id: number; nombre: string }[]
+      setDepositos(deps)
+      setStockAdjustDepositoId((prev) => prev ?? (deps[0]?.id ?? null))
+    }).catch(() => {})
+  }, [])
+
+  // Fetch master data for dropdowns.
+  // La DB remota puede tardar varios segundos: cada combo se carga de forma
+  // independiente y con reintentos, así un fallo transitorio no lo deja vacío.
+  useEffect(() => {
+    let cancelled = false
+    const loadOne = async <T,>(url: string, setter: (v: T[]) => void, tries = 3) => {
+      for (let i = 0; i < tries; i++) {
+        try {
+          const res = await api.get<PaginatedResponse<T>>(url, { params: { page_size: 1000 } })
+          if (!cancelled) setter(res.data.items)
+          return
+        } catch {
+          if (i < tries - 1) await new Promise((r) => setTimeout(r, 800 * (i + 1)))
+        }
       }
     }
-    fetchOptions()
+    setLoadingOptions(true)
+    Promise.all([
+      loadOne<Proveedor>('/proveedores', setProveedores),
+      loadOne<Laboratorio>('/laboratorios', setLaboratorios),
+    ]).finally(() => { if (!cancelled) setLoadingOptions(false) })
+    return () => { cancelled = true }
   }, [])
 
   const fetchProductos = useCallback(async () => {
@@ -196,6 +245,7 @@ export default function AdminProductosPage() {
         tipo_operacion: stockAdjustOp === 'manual' ? 'ADJUST' : stockAdjustOp.toUpperCase(),
         origen: stockAdjustPool === 'a' ? 'STOCK_A' : 'STOCK_B',
         destino: stockAdjustOp === 'transfer' ? (stockAdjustTarget === 'a' ? 'STOCK_A' : 'STOCK_B') : null,
+        deposito_id: stockAdjustOp === 'manual' ? stockAdjustDepositoId : null,
         cantidad_cajas: cajasAdj,
         cantidad_blisters: blistersAdj,
         observacion: stockAdjustOp === 'manual' ? 'Ajuste manual de stock' : null
@@ -537,6 +587,16 @@ export default function AdminProductosPage() {
       sortable: false,
       render: (_value: unknown, row: Producto) => (
         <div className="flex items-center gap-1.5">
+          {row.url_pvp && (
+            <button
+              type="button"
+              onClick={() => setHistorialProducto(row)}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-[#003087] bg-[#003087]/10 rounded-lg hover:bg-[#003087]/20 transition-colors"
+              title="Historial de actualizaciones (PVP y stock)"
+            >
+              <History className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => openEdit(row)}
@@ -566,14 +626,56 @@ export default function AdminProductosPage() {
     },
   ], [])
 
+  const handleScrape = async () => {
+    setScrapeLoading(true)
+    const t = toast.loading('Actualizando PVP desde alfabeta.net… (puede demorar)')
+    try {
+      const res = await api.post('/scraper/trigger-pvp-scrape')
+      const { total = 0, updated = 0, skipped = 0, failed = 0 } = res.data || {}
+      toast.success(
+        `PVP actualizado: ${updated} con cambios, ${skipped} sin cambios, ${failed} fallidos (de ${total} con URL).`,
+        { id: t, duration: 7000 }
+      )
+      fetchProductos()
+    } catch {
+      toast.error('No se pudo ejecutar el scraper de PVP.', { id: t })
+    } finally {
+      setScrapeLoading(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Productos (Admin)</h1>
-          <p className="text-sm text-gray-500 mt-1">Gestiona productos, stock y precios</p>
+          <div className="flex items-center gap-3.5">
+            <div className="h-11 w-1.5 flex-shrink-0 rounded-full bg-gradient-to-b from-[#00AEEF] to-[#003087]" />
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900">Productos</h1>
+              <p className="mt-0.5 text-sm text-gray-500">Gestiona productos, stock y precios</p>
+            </div>
+          </div>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          <button
+            type="button"
+            onClick={handleScrape}
+            disabled={scrapeLoading}
+            title="Ejecuta el scraper de PVP (alfabeta.net) ahora. Automático: todos los viernes 3:00 AM."
+            className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors disabled:opacity-60"
+          >
+            <RefreshCw className={`w-4 h-4 ${scrapeLoading ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{scrapeLoading ? 'Actualizando…' : 'Actualizar PVP'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setScraperLogsOpen(true)}
+            title="Ver historial de corridas del scraper de PVP"
+            className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+          >
+            <History className="w-4 h-4" />
+            <span className="hidden sm:inline">Logs PVP</span>
+          </button>
           <button
             type="button"
             onClick={() => setBulkPriceModal(true)}
@@ -660,9 +762,21 @@ export default function AdminProductosPage() {
         editingProducto={editingProducto}
         proveedores={proveedores}
         laboratorios={laboratorios}
+        loadingOptions={loadingOptions}
         onClose={closeModal}
         onSaved={fetchProductos}
       />
+
+      {historialProducto && (
+        <ProductoHistorialModal
+          producto={{ id: historialProducto.id, codigo: historialProducto.codigo, nombre: historialProducto.nombre }}
+          onClose={() => setHistorialProducto(null)}
+        />
+      )}
+
+      {scraperLogsOpen && (
+        <ScraperLogsModal onClose={() => setScraperLogsOpen(false)} />
+      )}
 
       {/* Stock Adjustment Modal */}      {stockModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -793,18 +907,24 @@ export default function AdminProductosPage() {
 
               {stockAdjustOp === 'manual' && (
                 <div className="space-y-4">
+                  <p className="text-[10px] font-black uppercase text-gray-400">Depósito a ajustar</p>
                   <div className="grid grid-cols-2 gap-2">
-                    {(['a', 'b'] as const).map(pool => (
-                      <button
-                        key={pool}
-                        onClick={() => setStockAdjustPool(pool)}
-                        className={`p-3 rounded-xl border-2 text-left transition-all ${stockAdjustPool === pool ? 'border-red-400 bg-red-50' : 'border-gray-100 bg-white'
-                          }`}
-                      >
-                        <p className="text-[10px] font-black uppercase text-gray-400">Stock {pool.toUpperCase()}</p>
-                        <p className="text-xs font-bold">{pool === 'a' ? stockModal.stock_a_cajas : stockModal.stock_b_cajas} cj + {pool === 'a' ? stockModal.stock_a_blisters : stockModal.stock_b_blisters} bl</p>
-                      </button>
-                    ))}
+                    {depositos.map((dep) => {
+                      const st = (stockModal as Producto & { stocks?: StockDep[] }).stocks?.find((s) => s.deposito_id === dep.id)
+                      const cajas = st?.cajas ?? 0
+                      const blisters = st?.blisters ?? 0
+                      return (
+                        <button
+                          key={dep.id}
+                          onClick={() => setStockAdjustDepositoId(dep.id)}
+                          className={`p-3 rounded-xl border-2 text-left transition-all ${stockAdjustDepositoId === dep.id ? 'border-red-400 bg-red-50' : 'border-gray-100 bg-white'
+                            }`}
+                        >
+                          <p className="text-[10px] font-black uppercase text-gray-400 truncate">{dep.nombre}</p>
+                          <p className="text-xs font-bold">{cajas} cj + {blisters} bl</p>
+                        </button>
+                      )
+                    })}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -843,7 +963,7 @@ export default function AdminProductosPage() {
                 <button
                   type="button"
                   onClick={handleStockAdjust}
-                  disabled={adjusting || (stockAdjustOp === 'transfer' && !stockAdjustCajas && !stockAdjustBlisters) || (stockAdjustOp === 'fraction' && (stockAdjustPool === 'a' ? stockModal.stock_a_cajas : stockModal.stock_b_cajas) <= 0)}
+                  disabled={adjusting || (stockAdjustOp === 'manual' && (!stockAdjustDepositoId || (!stockAdjustCajas && !stockAdjustBlisters))) || (stockAdjustOp === 'transfer' && !stockAdjustCajas && !stockAdjustBlisters) || (stockAdjustOp === 'fraction' && (stockAdjustPool === 'a' ? stockModal.stock_a_cajas : stockModal.stock_b_cajas) <= 0)}
                   className="inline-flex items-center gap-2 px-6 py-2 text-sm font-bold text-white bg-[#00AEEF] rounded-xl hover:bg-[#0098d4] shadow-lg shadow-[#00AEEF]/20 transition-all active:scale-95 disabled:opacity-50"
                 >
                   {adjusting && <Loader2 className="w-4 h-4 animate-spin" />}

@@ -82,12 +82,13 @@ interface Props {
   editingProducto: Producto | null
   proveedores: Proveedor[]
   laboratorios: Laboratorio[]
+  loadingOptions?: boolean
   onClose: () => void
   onSaved: (producto?: Producto) => void
   initialProveedorId?: number | null
 }
 
-export default function ProductoModal({ open, editingProducto, proveedores, laboratorios, onClose, onSaved, initialProveedorId }: Props) {
+export default function ProductoModal({ open, editingProducto, proveedores, laboratorios, loadingOptions, onClose, onSaved, initialProveedorId }: Props) {
   const [form, setForm] = useState<ProductoForm>(emptyForm)
   const [saving, setSaving] = useState(false)
   const [fetchingPvp, setFetchingPvp] = useState(false)
@@ -410,9 +411,12 @@ export default function ProductoModal({ open, editingProducto, proveedores, labo
               <select
                 value={form.proveedor_id}
                 onChange={(e) => setForm({ ...form, proveedor_id: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] bg-white"
+                disabled={loadingOptions && proveedores.length === 0}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] bg-white disabled:bg-gray-50 disabled:text-gray-400"
               >
-                <option value="">— Sin proveedor —</option>
+                <option value="">
+                  {loadingOptions && proveedores.length === 0 ? 'Cargando proveedores…' : '— Sin proveedor —'}
+                </option>
                 {proveedores.map((p) => (
                   <option key={p.id} value={p.id}>{p.nombre}</option>
                 ))}
@@ -424,9 +428,12 @@ export default function ProductoModal({ open, editingProducto, proveedores, labo
               <select
                 value={form.laboratorio_id}
                 onChange={(e) => setForm({ ...form, laboratorio_id: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] bg-white"
+                disabled={loadingOptions && laboratorios.length === 0}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] bg-white disabled:bg-gray-50 disabled:text-gray-400"
               >
-                <option value="">— Sin laboratorio —</option>
+                <option value="">
+                  {loadingOptions && laboratorios.length === 0 ? 'Cargando laboratorios…' : '— Sin laboratorio —'}
+                </option>
                 {laboratorios.map((l) => (
                   <option key={l.id} value={l.id}>{l.nombre}</option>
                 ))}

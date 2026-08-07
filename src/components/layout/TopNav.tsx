@@ -17,6 +17,11 @@ import {
   LogOut,
   Truck as TruckIcon,
   SlidersHorizontal,
+  Building2,
+  FlaskConical,
+  Settings,
+  ShoppingCart,
+  Warehouse,
 } from 'lucide-react';
 import { useFeatureFlags } from '@/hooks/useFeatureFlags';
 import { featureKeyForHref } from '@/lib/features';
@@ -60,7 +65,9 @@ export default function TopNav({ user, onLogout, onChangePassword }: TopNavProps
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const configRef = useRef<HTMLDivElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const hamburgerRef = useRef<HTMLButtonElement>(null);
 
@@ -80,35 +87,53 @@ export default function TopNav({ user, onLogout, onChangePassword }: TopNavProps
     [isSuperAdmin, isEnabled]
   );
 
-  // Menú simplificado: por ahora solo Clientes y Productos (además de Dashboard).
-  // El destino cambia según el rol: admin usa las vistas de gestión completas,
-  // ventas usa las vistas operativas accesibles para su rol.
-  const navItems = useMemo<NavItem[]>(() => {
+  // Menú tipo ERP en grupos separados por "|":
+  //   [Productos] | [Clientes, Proveedores] | [⚙ Configuración]
+  // (Dashboard/Inicio queda accesible desde el logo.)
+  const { mainGroups, configItems } = useMemo<{ mainGroups: NavItem[][]; configItems: NavItem[] }>(() => {
     if (isRepartidor) {
-      return [{ label: 'Entregas', href: '/dashboard/entregas', icon: TruckIcon }];
+      return { mainGroups: [[{ label: 'Entregas', href: '/dashboard/entregas', icon: TruckIcon }]], configItems: [] };
     }
 
     const clientesHref = hasAdminAccess ? '/dashboard/admin/clientes' : '/dashboard/clientes';
     const productosHref = hasAdminAccess ? '/dashboard/admin/productos' : '/dashboard/stock';
 
-    const items: NavItem[] = [
-      { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-      { label: 'Clientes', href: clientesHref, icon: Users },
-      { label: 'Productos', href: productosHref, icon: Package },
+    // Grupo Clientes (+ Proveedores para admin).
+    const grupoClientes: NavItem[] = [{ label: 'Clientes', href: clientesHref, icon: Users }];
+    if (hasAdminAccess) {
+      grupoClientes.push({ label: 'Proveedores', href: '/dashboard/admin/proveedores', icon: Building2 });
+    }
+
+    const groups: NavItem[][] = [
+      [{ label: 'Vender', href: '/dashboard/pedidos', icon: ShoppingCart }],
+      [{ label: 'Productos', href: productosHref, icon: Package }],
+      grupoClientes,
     ];
 
-    // super_admin conserva las herramientas para ir habilitando módulos de a poco
+    // Submenú "Configuración": tablas de apoyo y herramientas de admin.
+    const config: NavItem[] = [];
+    if (hasAdminAccess) {
+      config.push(
+        { label: 'Depósitos', href: '/dashboard/admin/depositos', icon: Warehouse },
+        { label: 'Laboratorios', href: '/dashboard/admin/tablas/laboratorios', icon: FlaskConical }
+      );
+    }
     if (isSuperAdmin) {
-      items.push(
+      config.push(
         { label: 'Usuarios', href: '/dashboard/admin/usuarios', icon: UserCog },
         { label: 'Funcionalidades', href: '/dashboard/admin/funcionalidades', icon: SlidersHorizontal }
       );
     }
 
-    return items;
+    return { mainGroups: groups, configItems: config };
   }, [isRepartidor, hasAdminAccess, isSuperAdmin]);
 
-  const visibleItems = useMemo(() => navItems.filter((i) => canSee(i.href)), [navItems, canSee]);
+  const visibleGroups = useMemo(
+    () => mainGroups.map((g) => g.filter((i) => canSee(i.href))).filter((g) => g.length > 0),
+    [mainGroups, canSee]
+  );
+  const visibleMainFlat = useMemo(() => visibleGroups.flat(), [visibleGroups]);
+  const visibleConfig = useMemo(() => configItems.filter((i) => canSee(i.href)), [configItems, canSee]);
 
   const isItemActive = useCallback(
     (href: string) => {
@@ -116,6 +141,11 @@ export default function TopNav({ user, onLogout, onChangePassword }: TopNavProps
       return pathname.startsWith(href);
     },
     [pathname]
+  );
+
+  const configActive = useMemo(
+    () => visibleConfig.some((i) => isItemActive(i.href)),
+    [visibleConfig, isItemActive]
   );
 
   // Close user dropdown on outside click
@@ -128,6 +158,17 @@ export default function TopNav({ user, onLogout, onChangePassword }: TopNavProps
     if (dropdownOpen) document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [dropdownOpen]);
+
+  // Close config dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (configRef.current && !configRef.current.contains(event.target as Node)) {
+        setConfigOpen(false);
+      }
+    }
+    if (configOpen) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [configOpen]);
 
   // Close mobile menu on outside click
   useEffect(() => {
@@ -145,9 +186,10 @@ export default function TopNav({ user, onLogout, onChangePassword }: TopNavProps
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [mobileMenuOpen]);
 
-  // Close mobile menu on route change
+  // Close menus on route change
   useEffect(() => {
     setMobileMenuOpen(false);
+    setConfigOpen(false);
   }, [pathname]);
 
   return (
@@ -179,22 +221,72 @@ export default function TopNav({ user, onLogout, onChangePassword }: TopNavProps
 
         {/* Center: Desktop Nav */}
         <div className="hidden lg:flex items-center flex-1 min-w-0 gap-1">
-          {visibleItems.map((item) => {
-            const active = isItemActive(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`px-3.5 xl:px-4 py-1.5 rounded-full text-xs xl:text-sm font-semibold tracking-tight transition-all whitespace-nowrap ${active
+          {visibleGroups.map((group, gi) => (
+            <div key={gi} className="flex items-center gap-1">
+              {gi > 0 && <div className="w-px h-5 mx-1.5 bg-white/20 flex-shrink-0" />}
+              {group.map((item) => {
+                const active = isItemActive(item.href);
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`flex items-center gap-1.5 xl:gap-2 px-3 xl:px-3.5 py-1.5 rounded-full text-xs xl:text-sm font-semibold tracking-tight transition-all whitespace-nowrap ${active
+                      ? 'text-white shadow-[0_2px_12px_rgba(0,174,239,0.45)]'
+                      : 'text-white/65 hover:text-white hover:bg-white/10'
+                      }`}
+                    style={active ? { background: 'linear-gradient(135deg, #00AEEF 0%, #0093D4 100%)' } : undefined}
+                  >
+                    <Icon size={15} className={active ? 'text-white' : 'text-white/50'} strokeWidth={2.25} />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
+
+          {/* Separador + Dropdown "Configuración" */}
+          {visibleConfig.length > 0 && (
+            <div className="relative flex items-center gap-1" ref={configRef}>
+              <div className="w-px h-5 mx-1.5 bg-white/20 flex-shrink-0" />
+              <button
+                onClick={() => setConfigOpen((v) => !v)}
+                className={`flex items-center gap-1.5 xl:gap-2 px-3 xl:px-3.5 py-1.5 rounded-full text-xs xl:text-sm font-semibold tracking-tight transition-all whitespace-nowrap ${configActive
                   ? 'text-white shadow-[0_2px_12px_rgba(0,174,239,0.45)]'
                   : 'text-white/65 hover:text-white hover:bg-white/10'
                   }`}
-                style={active ? { background: 'linear-gradient(135deg, #00AEEF 0%, #0093D4 100%)' } : undefined}
+                style={configActive ? { background: 'linear-gradient(135deg, #00AEEF 0%, #0093D4 100%)' } : undefined}
               >
-                {item.label}
-              </Link>
-            );
-          })}
+                <Settings size={15} className={configActive ? 'text-white' : 'text-white/50'} strokeWidth={2.25} />
+                Configuración
+                <ChevronDown size={13} className={`transition-transform ${configOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {configOpen && (
+                <div className="absolute left-0 top-full mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 py-1 z-[9999]">
+                  <div className="absolute -top-2 left-5 w-4 h-4 bg-white border-l border-t border-gray-200 rotate-45" />
+                  {visibleConfig.map((item) => {
+                    const Icon = item.icon;
+                    const active = isItemActive(item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setConfigOpen(false)}
+                        className={`flex items-center gap-2.5 px-4 py-2 text-sm transition-colors relative bg-white ${active
+                          ? 'text-[#003087] font-semibold bg-[#003087]/5'
+                          : 'text-gray-700 hover:bg-gray-50'
+                          }`}
+                      >
+                        <Icon size={16} className={active ? 'text-[#00AEEF]' : 'text-gray-400'} />
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right: Date + User (Desktop) */}
@@ -290,7 +382,7 @@ export default function TopNav({ user, onLogout, onChangePassword }: TopNavProps
             style={{ backgroundColor: '#001B5A' }}
           >
             <div className="px-4 py-3 space-y-1">
-              {visibleItems.map((item) => {
+              {visibleMainFlat.map((item) => {
                 const Icon = item.icon;
                 const active = isItemActive(item.href);
                 return (
@@ -308,6 +400,32 @@ export default function TopNav({ user, onLogout, onChangePassword }: TopNavProps
                   </Link>
                 );
               })}
+
+              {/* Sección Configuración */}
+              {visibleConfig.length > 0 && (
+                <>
+                  <div className="h-px my-2 bg-white/15" />
+                  <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-widest text-white/40">Configuración</div>
+                  {visibleConfig.map((item) => {
+                    const Icon = item.icon;
+                    const active = isItemActive(item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${active
+                          ? 'text-white shadow-[0_2px_12px_rgba(0,174,239,0.4)]'
+                          : 'text-white/70 hover:text-white hover:bg-white/10'
+                          }`}
+                        style={active ? { background: 'linear-gradient(135deg, #00AEEF 0%, #0093D4 100%)' } : undefined}
+                      >
+                        <Icon size={18} />
+                        <span>{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </>
+              )}
             </div>
 
             {/* Mobile: User section */}

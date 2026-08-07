@@ -11,6 +11,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { useClientesData } from '@/hooks/useClientesData'
 import DataGrid from '@/components/grilla/DataGrid'
 import ClienteFormModal from '@/components/clientes/ClienteFormModal'
+import UnificarClientesModal from '@/components/admin/UnificarClientesModal'
+import { GitMerge } from 'lucide-react'
 import { ClienteConDeuda } from '@/types'
 
 export default function AdminClientesPage() {
@@ -33,6 +35,7 @@ export default function AdminClientesPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<ClienteConDeuda | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  const [unificarOpen, setUnificarOpen] = useState(false)
   const [importModalOpen, setImportModalOpen] = useState(false)
   const [importData, setImportData] = useState<Record<string, unknown>[] | null>(null)
   const [importFile, setImportFile] = useState<File | null>(null)
@@ -233,6 +236,7 @@ export default function AdminClientesPage() {
         return <span className={`inline-block w-4 h-4 rounded-full ${colors[value] || 'bg-gray-300'}`} title={tooltip} />
       },
     },
+    /* --- OCULTO (revivir): columnas Remitos / Facturas / Deuda. Ver docs/OCULTO_PARA_REVIVIR.md ---
     {
       key: 'saldo_remitos',
       label: 'Remitos',
@@ -263,6 +267,7 @@ export default function AdminClientesPage() {
         </span>
       ),
     },
+    --- FIN OCULTO --- */
     {
       key: 'activo',
       label: 'Estado',
@@ -338,10 +343,24 @@ export default function AdminClientesPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Clientes (Admin)</h1>
-          <p className="text-sm text-gray-500 mt-1">Gestiona clientes, pedidos y pagos</p>
+          <div className="flex items-center gap-3.5">
+            <div className="h-11 w-1.5 flex-shrink-0 rounded-full bg-gradient-to-b from-[#00AEEF] to-[#003087]" />
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900">Clientes</h1>
+              <p className="mt-0.5 text-sm text-gray-500">Gestiona clientes, pedidos y pagos</p>
+            </div>
+          </div>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setUnificarOpen(true)}
+            title="Unificar dos clientes duplicados"
+            className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors"
+          >
+            <GitMerge className="w-4 h-4" />
+            <span className="hidden sm:inline">Unificar</span>
+          </button>
           <button
             type="button"
             onClick={() => setImportModalOpen(true)}
@@ -386,6 +405,13 @@ export default function AdminClientesPage() {
         onSuccess={fetchClientes}
         isAdmin={true}
       />
+
+      {unificarOpen && (
+        <UnificarClientesModal
+          onClose={() => setUnificarOpen(false)}
+          onMerged={fetchClientes}
+        />
+      )}
 
       {/* Delete Confirmation */}
       {deleteConfirm && (

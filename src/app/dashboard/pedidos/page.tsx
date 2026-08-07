@@ -3,13 +3,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Eye, Edit, X, ClipboardList, Truck, DollarSign, Trash2, FileText, ChevronDown, CreditCard, Plus, History, ListTree } from 'lucide-react'
+import { Eye, Edit, X, ClipboardList, Truck, DollarSign, Trash2, FileText, ChevronDown, CreditCard, Plus, History, ListTree, Construction } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useAuth } from '@/hooks/useAuth'
 import DataGrid from '@/components/grilla/DataGrid'
+import StatCard from '@/components/dashboard/StatCard'
 import BitacoraPedido from '@/components/pedidos/BitacoraPedido'
 import { GRUPO_BADGE, GRUPO_LABEL, GRUPO_OPTIONS, esGrupo } from '@/lib/listas'
 import { Pedido, PaginatedResponse } from '@/types'
@@ -182,6 +183,10 @@ export default function PedidosPage() {
   const [nuevoShipping, setNuevoShipping] = useState<string>('')
   const [nuevoPago, setNuevoPago] = useState<string>('')
   const [savingEstado, setSavingEstado] = useState(false)
+  // Pedidos sin pagos: oculta el estado de pago en el modal (revivible: true).
+  const MOSTRAR_ESTADO_PAGO = false as boolean
+  // Lista de pedidos: por ahora solo contadores; filtros+tabla → "Próximamente" (revivible: true).
+  const PEDIDOS_LISTA_ENABLED = false as boolean
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deletingPedido, setDeletingPedido] = useState(false)
   const [transiciones, setTransiciones] = useState<{ shipping: Record<string, string[]>; payment: Record<string, string[]> }>({ shipping: {}, payment: {} })
@@ -502,6 +507,7 @@ export default function PedidosPage() {
         </div>
       ),
     },
+    /* --- OCULTO (revivir): columna Pago — pedidos sin pagos. Ver docs/OCULTO_PARA_REVIVIR.md ---
     {
       key: 'payment_status',
       label: 'Pago',
@@ -523,6 +529,7 @@ export default function PedidosPage() {
         </span>
       ),
     },
+    --- FIN OCULTO --- */
     {
       key: 'repartidor_nombre',
       label: 'Repartidor',
@@ -547,6 +554,7 @@ export default function PedidosPage() {
       filterType: 'text' as const,
       render: (value: string | null) => value || '-',
     },
+    /* --- OCULTO (revivir): columna Saldo — pedidos sin pagos. ---
     {
       key: 'saldo_pendiente',
       label: 'Saldo',
@@ -559,6 +567,7 @@ export default function PedidosPage() {
         </span>
       ),
     },
+    --- FIN OCULTO --- */
     {
       key: 'acciones',
       label: 'Acciones',
@@ -615,64 +624,46 @@ export default function PedidosPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Pedidos</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Gestiona los pedidos de venta
-          </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3.5">
+          <div className="h-11 w-1.5 flex-shrink-0 rounded-full bg-gradient-to-b from-[#00AEEF] to-[#003087]" />
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">Pedidos</h1>
+            <p className="mt-0.5 text-sm text-gray-500">Gestiona los pedidos de venta</p>
+          </div>
         </div>
-        <Link
-          href="/dashboard/pedidos/nuevo"
-          className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#003087] rounded-lg hover:bg-[#002570] transition-colors"
+        <button
+          type="button"
+          disabled
+          title="Próximamente"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-200 px-5 py-2.5 text-sm font-semibold text-gray-400 cursor-not-allowed"
         >
           <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">Nuevo Pedido</span>
-        </Link>
+          <span>Nuevo Pedido</span>
+        </button>
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center gap-4">
-          <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-blue-50">
-            <ClipboardList className="w-5 h-5 text-blue-600" />
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Total Pedidos</p>
-            <p className="text-xl font-bold text-gray-900">{totalPedidos}</p>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center gap-4">
-          <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-green-50">
-            <DollarSign className="w-5 h-5 text-green-600" />
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Importe Total</p>
-            <p className="text-xl font-bold text-gray-900">
-              {formatCurrency(importeTotal)}
-            </p>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center gap-4">
-          <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-purple-50">
-            <CreditCard className="w-5 h-5 text-purple-600" />
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Pendientes Pago</p>
-            <p className="text-xl font-bold text-gray-900">{pendientesPago}</p>
-          </div>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center gap-4">
-          <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-amber-50">
-            <Truck className="w-5 h-5 text-amber-600" />
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Pendientes Entrega</p>
-            <p className="text-xl font-bold text-gray-900">{pendientesEntrega}</p>
-          </div>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard title="Total Pedidos" value={totalPedidos} icon={ClipboardList} color="blue" />
+        <StatCard title="Importe Total" value={formatCurrency(importeTotal)} icon={DollarSign} color="green" />
+        <StatCard title="Pendientes Entrega" value={pendientesEntrega} icon={Truck} color="amber" />
       </div>
 
+      {/* Lista (filtros + tabla): por ahora "Próximamente". Revivible: PEDIDOS_LISTA_ENABLED = true */}
+      {!PEDIDOS_LISTA_ENABLED && (
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white/60 py-20 text-center">
+          <div
+            className="flex h-14 w-14 items-center justify-center rounded-2xl text-white shadow-md shadow-black/10"
+            style={{ background: 'linear-gradient(135deg, #00AEEF 0%, #003087 100%)' }}
+          >
+            <Construction className="h-7 w-7" />
+          </div>
+          <h2 className="mt-4 text-lg font-bold tracking-tight text-gray-900">Próximamente</h2>
+        </div>
+      )}
+
+      {PEDIDOS_LISTA_ENABLED && (<>
       {/* Período */}
       <div className="flex flex-wrap items-center gap-3">
         <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Período</label>
@@ -716,6 +707,8 @@ export default function PedidosPage() {
             </button>
           ))}
         </div>
+        {/* OCULTO (revivir): filtro por estado de Pago — pedidos sin pagos */}
+        {MOSTRAR_ESTADO_PAGO && (<>
         <p className="text-xs font-medium text-gray-500 uppercase tracking-wide pt-1">Pago</p>
         <div className="flex flex-wrap gap-2">
           {PAYMENT_TABS.map((tab) => (
@@ -732,6 +725,7 @@ export default function PedidosPage() {
             </button>
           ))}
         </div>
+        </>)}
       </div>
 
       {/* DataGrid */}
@@ -749,9 +743,10 @@ export default function PedidosPage() {
         onSort={(key, dir) => { setSortBy(key); setSortDir(dir); setPage(1) }}
         onColumnFilter={(filters) => { setColumnFilters(filters); setPage(1) }}
         onExport={handleExport}
-        searchPlaceholder="Buscar por n\u00B0 pedido, cliente..."
+        searchPlaceholder="Buscar por N\u00B0 pedido, cliente..."
         storageKey="pedidos-grid-columns"
       />
+      </>)}
 
       {/* Detail Modal */}
       {showDetailModal && selectedPedido && (
@@ -1068,6 +1063,8 @@ export default function PedidosPage() {
                 </select>
               </div>
 
+              {/* OCULTO (revivir): estado de pago en el modal — pedidos sin pagos */}
+              {MOSTRAR_ESTADO_PAGO && (<>
               {/* Payment status */}
               <div className="border-t border-gray-100 pt-4">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1098,6 +1095,7 @@ export default function PedidosPage() {
                   ))}
                 </select>
               </div>
+              </>)}
 
               <div className="flex justify-end gap-3 pt-2">
                 <button

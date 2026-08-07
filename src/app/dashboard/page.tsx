@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { DollarSign, Package, Users, CreditCard, ClipboardList, FileText, ChevronLeft, ChevronRight, AlertTriangle, UserX, PackageX } from 'lucide-react'
+import { DollarSign, Package, Users, CreditCard, ClipboardList, FileText, ChevronLeft, ChevronRight, AlertTriangle, UserX, PackageX, Construction } from 'lucide-react'
 import api from '@/lib/api'
 import { DashboardVentas, DashboardAdmin } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -18,20 +18,20 @@ function SkeletonGrid() {
     <div className="space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+          <div key={i} className="bg-white rounded-2xl shadow-sm border border-gray-200/60 p-5">
             <div className="flex items-center justify-between">
               <div className="space-y-2 flex-1">
                 <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
                 <div className="h-7 w-32 bg-gray-200 rounded animate-pulse" />
               </div>
-              <div className="h-12 w-12 bg-gray-200 rounded-lg animate-pulse" />
+              <div className="h-11 w-11 bg-gray-200 rounded-xl animate-pulse" />
             </div>
           </div>
         ))}
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {Array.from({ length: 2 }).map((_, i) => (
-          <div key={i} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+          <div key={i} className="bg-white rounded-2xl shadow-sm border border-gray-200/60 p-5">
             <div className="h-4 w-40 bg-gray-200 rounded animate-pulse mb-4" />
             <div className="h-[280px] bg-gray-100 rounded animate-pulse" />
           </div>
@@ -135,8 +135,8 @@ function VentasDashboard() {
           title="Estados de Mis Pedidos"
           data={estadosPedidosData}
         />
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">Ultimos Pedidos</h3>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200/60 p-5">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-4 before:h-4 before:w-1 before:rounded-full before:bg-gradient-to-b before:from-[#00AEEF] before:to-[#003087] before:content-['']">Ultimos Pedidos</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -191,13 +191,11 @@ function buildMonthOptions(count = 12) {
   return opts
 }
 
-function AdminDashboard() {
+function AdminDashboard({ mes, onLoadingChange }: { mes: string; onLoadingChange?: (v: boolean) => void }) {
   const [data, setData] = useState<DashboardAdmin | null>(null)
   const [loading, setLoading] = useState(true)
   const [stockBajoPage, setStockBajoPage] = useState(1)
-  const [mes, setMes] = useState<string>(currentMonthValue())
   const STOCK_BAJO_PAGE_SIZE = 5
-  const monthOptions = useMemo(() => buildMonthOptions(12), [])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -214,6 +212,11 @@ function AdminDashboard() {
     fetchData()
   }, [mes])
 
+  // Reporta el estado de carga al header (para el selector de periodo)
+  useEffect(() => {
+    onLoadingChange?.(loading)
+  }, [loading, onLoadingChange])
+
   if (!data) return <SkeletonGrid />
 
   const tiposPagoData = data.tipos_pago.map((tp) => ({
@@ -223,32 +226,6 @@ function AdminDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Selector de mes */}
-      <div className="flex items-center justify-end gap-3">
-        {loading && (
-          <span className="flex items-center gap-2 text-sm text-gray-500">
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-[#003087]" />
-            Actualizando…
-          </span>
-        )}
-        <label htmlFor="dashboard-mes" className="text-sm font-medium text-gray-600">
-          Periodo
-        </label>
-        <select
-          id="dashboard-mes"
-          value={mes}
-          onChange={(e) => setMes(e.target.value)}
-          disabled={loading}
-          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm focus:border-[#003087] focus:outline-none focus:ring-1 focus:ring-[#003087] disabled:opacity-60"
-        >
-          {monthOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
       {/* Barra de progreso indeterminada */}
       <div className="relative h-1 w-full overflow-hidden rounded-full bg-gray-100">
         {loading && <div className="progress-indeterminate" />}
@@ -313,8 +290,8 @@ function AdminDashboard() {
 
       {/* Secciones de Tablas - Al ancho completo debajo del grid principal */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">Top 5 Vendedores del Mes</h3>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200/60 p-5">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-4 before:h-4 before:w-1 before:rounded-full before:bg-gradient-to-b before:from-[#00AEEF] before:to-[#003087] before:content-['']">Top 5 Vendedores del Mes</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -345,11 +322,11 @@ function AdminDashboard() {
           const startIdx = (safePageNum - 1) * STOCK_BAJO_PAGE_SIZE
           const pageItems = data.stock_bajo.slice(startIdx, startIdx + STOCK_BAJO_PAGE_SIZE)
           return (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200/60 p-5">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-gray-700">Productos con Stock Bajo</h3>
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800 before:h-4 before:w-1 before:rounded-full before:bg-gradient-to-b before:from-[#E31837] before:to-[#A0112A] before:content-['']">Productos con Stock Bajo</h3>
                 {totalStockBajo > 0 && (
-                  <span className="text-xs text-gray-400">{totalStockBajo} productos</span>
+                  <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-600">{totalStockBajo} productos</span>
                 )}
               </div>
               <div className="overflow-x-auto">
@@ -381,8 +358,8 @@ function AdminDashboard() {
         })()}
 
         {/* Ultimos 5 Pagos */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">Ultimos 5 Pagos</h3>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200/60 p-5">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-4 before:h-4 before:w-1 before:rounded-full before:bg-gradient-to-b before:from-[#00AEEF] before:to-[#003087] before:content-['']">Ultimos 5 Pagos</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -415,6 +392,12 @@ function AdminDashboard() {
 
 export default function DashboardPage() {
   const { user, isLoading } = useAuth()
+  const [mes, setMes] = useState<string>(currentMonthValue())
+  const [dashLoading, setDashLoading] = useState(false)
+  const monthOptions = useMemo(() => buildMonthOptions(12), [])
+  // Interruptor del contenido del dashboard. false = placeholder "en preparación"
+  // (no se elimina nada). Poner en true para revivir el panel. Ver docs/OCULTO_PARA_REVIVIR.md
+  const DASHBOARD_CONTENT_ENABLED = false
 
   if (isLoading) return <SkeletonGrid />
 
@@ -424,19 +407,68 @@ export default function DashboardPage() {
     redirect('/dashboard/entregas')
   }
 
+  const isAdmin = role === 'admin' || role === 'super_admin'
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">
-          {(role === 'admin' || role === 'super_admin') ? 'Panel de Administración' : role === 'ventas' ? 'Mi Panel de Ventas' : 'Panel de Repartidor'}
-        </h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Bienvenido, {user?.nombre_completo || user?.username}
-        </p>
+      {/* Header: título (izquierda) y filtro de periodo (derecha) en la misma fila */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3.5">
+          <div className="h-11 w-1.5 flex-shrink-0 rounded-full bg-gradient-to-b from-[#00AEEF] to-[#003087]" />
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+              {isAdmin ? 'Panel de Administración' : role === 'ventas' ? 'Mi Panel de Ventas' : 'Panel de Repartidor'}
+            </h1>
+            <p className="mt-0.5 text-sm text-gray-500">
+              Bienvenido, <span className="font-medium text-gray-700">{user?.nombre_completo || user?.username}</span>
+            </p>
+          </div>
+        </div>
+
+        {DASHBOARD_CONTENT_ENABLED && isAdmin && (
+          <div className="flex items-center gap-3 self-end sm:self-auto">
+            {dashLoading && (
+              <span className="flex items-center gap-2 text-sm text-gray-500">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-[#003087]" />
+                Actualizando…
+              </span>
+            )}
+            <label htmlFor="dashboard-mes" className="text-sm font-medium text-gray-600">
+              Periodo
+            </label>
+            <select
+              id="dashboard-mes"
+              value={mes}
+              onChange={(e) => setMes(e.target.value)}
+              disabled={dashLoading}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm focus:border-[#003087] focus:outline-none focus:ring-1 focus:ring-[#003087] disabled:opacity-60"
+            >
+              {monthOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
-      {role === 'ventas' && <VentasDashboard />}
-      {(role === 'admin' || role === 'super_admin') && <AdminDashboard />}
+      {DASHBOARD_CONTENT_ENABLED ? (
+        <>
+          {role === 'ventas' && <VentasDashboard />}
+          {isAdmin && <AdminDashboard mes={mes} onLoadingChange={setDashLoading} />}
+        </>
+      ) : (
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white/60 py-20 text-center">
+          <div
+            className="flex h-14 w-14 items-center justify-center rounded-2xl text-white shadow-md shadow-black/10"
+            style={{ background: 'linear-gradient(135deg, #00AEEF 0%, #003087 100%)' }}
+          >
+            <Construction className="h-7 w-7" />
+          </div>
+          <h2 className="mt-4 text-lg font-bold tracking-tight text-gray-900">Próximamente</h2>
+        </div>
+      )}
     </div>
   )
 }
