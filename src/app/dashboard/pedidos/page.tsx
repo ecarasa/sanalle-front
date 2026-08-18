@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Eye, Edit, X, ClipboardList, Truck, DollarSign, Trash2, FileText, ChevronDown, CreditCard, Plus, History, ListTree, Construction } from 'lucide-react'
+import { Eye, Edit, X, ClipboardList, Truck, DollarSign, Trash2, FileText, MoreVertical, CreditCard, Plus, History, ListTree, Construction, UserPlus, MapPin, Phone, User, Package, Calendar, Building2, Hash } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -12,6 +13,8 @@ import { useAuth } from '@/hooks/useAuth'
 import DataGrid from '@/components/grilla/DataGrid'
 import StatCard from '@/components/dashboard/StatCard'
 import BitacoraPedido from '@/components/pedidos/BitacoraPedido'
+import AsignarRepartidorModal from '@/components/pedidos/AsignarRepartidorModal'
+import RegistrarPagoPedidoModal from '@/components/pedidos/RegistrarPagoPedidoModal'
 import { GRUPO_BADGE, GRUPO_LABEL, GRUPO_OPTIONS, esGrupo } from '@/lib/listas'
 import { Pedido, PaginatedResponse } from '@/types'
 
@@ -102,59 +105,148 @@ const TIPO_DOC_BADGE: Record<string, string> = {
   factura: 'bg-purple-100 text-purple-700',
 }
 
+const SEMAFORO_INFO: Record<string, { label: string; dot: string; text: string }> = {
+  rojo: { label: 'Atrasado', dot: 'bg-red-500', text: 'text-red-600' },
+  amarillo: { label: 'Por vencer', dot: 'bg-amber-400', text: 'text-amber-600' },
+  verde: { label: 'Al día', dot: 'bg-emerald-500', text: 'text-emerald-600' },
+  azul: { label: 'Pagado', dot: 'bg-blue-500', text: 'text-blue-600' },
+  gris: { label: 'Sin datos', dot: 'bg-gray-300', text: 'text-gray-400' },
+}
+
 const SOCIEDAD_BADGE: Record<string, string> = {
   sanalle: 'bg-blue-600 text-white',
   farmacare: 'bg-red-600 text-white',
 }
 
-function PedidoPdfDropdown({ pedidoId, onViewPdf }: { pedidoId: number; onViewPdf: (id: number, sinValores: boolean) => void }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+/**
+ * Menú de acciones del pedido (kebab). Agrupa todas las acciones secundarias en un
+ * único dropdown por portal, para que la columna "Acciones" no ocupe una fila larga
+ * de botones. Mantiene el patrón de posicionamiento fixed + click-outside + reposición
+ * en scroll que antes usaba el dropdown de PDF.
+ */
+interface PedidoAccionesMenuProps {
+  pedido: Pedido
+  isAdmin: boolean
+  onViewPdf: (id: number, sinValores: boolean) => void
+  onEdit: () => void
+  onEstado: () => void
+  onRegistrarPago: () => void
+  onAsignar: () => void
+  onDelete: () => void
+}
 
+function PedidoAccionesMenu({
+  pedido,
+  isAdmin,
+  onViewPdf,
+  onEdit,
+  onEstado,
+  onRegistrarPago,
+  onAsignar,
+  onDelete,
+}: PedidoAccionesMenuProps) {
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  const noFinalizado = pedido.shipping_status !== 'entregado' && pedido.shipping_status !== 'cancelado'
+  const puedeEliminar = pedido.shipping_status === 'pendiente' || pedido.shipping_status === 'en_preparacion'
+  const puedePagar =
+    pedido.shipping_status !== 'cancelado' &&
+    pedido.payment_status !== 'pagado' &&
+    pedido.payment_status !== 'cancelado'
+
+  // Cierra al clickear afuera (contemplando el menú, que va por portal).
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
+      const t = e.target as Node
+      if (btnRef.current?.contains(t) || menuRef.current?.contains(t)) return
+      setOpen(false)
     }
     if (open) document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [open])
 
+  // Posiciona el menú (fixed) según el botón; se recalcula al scrollear/redimensionar.
+  useEffect(() => {
+    if (!open) return
+    const update = () => {
+      const r = btnRef.current?.getBoundingClientRect()
+      if (r) setPos({ top: r.bottom + 4, left: r.right - 208 }) // w-52 = 208px, alineado a la derecha
+    }
+    update()
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
+  }, [open])
+
+  const itemClass = 'flex items-center gap-2.5 w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors text-left'
+
   return (
-    <div className="relative" ref={ref}>
+    <>
       <button
+        ref={btnRef}
         type="button"
-        onClick={() => setOpen(!open)}
-        className="p-2 text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition-colors flex items-center justify-center relative"
-        title="Generar PDF del Pedido"
+        onClick={() => setOpen((o) => !o)}
+        className="p-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-all hover:scale-105 active:scale-95"
+        title="Más acciones"
       >
-        <FileText className="w-4 h-4" />
-        <div className="absolute -bottom-0.5 -right-0.5 bg-white rounded-full">
-          <ChevronDown className="w-2.5 h-2.5" />
-        </div>
+        <MoreVertical className="w-4 h-4" />
       </button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-xl z-50 py-1 overflow-hidden">
-          <button
-            type="button"
-            onClick={() => { onViewPdf(pedidoId, false); setOpen(false) }}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-green-50 hover:text-green-700 transition-colors border-b border-gray-50 last:border-0"
-          >
-            <FileText className="w-3.5 h-3.5" />
-            Con valores
+      {open && pos && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: 'fixed', top: pos.top, left: Math.max(8, pos.left) }}
+          className="w-52 bg-white border border-gray-200 rounded-lg shadow-xl z-[9999] py-1 overflow-hidden"
+        >
+          {noFinalizado && (
+            <button type="button" onClick={() => { onEdit(); setOpen(false) }} className={itemClass}>
+              <Edit className="w-4 h-4 text-amber-600" />
+              Editar pedido
+            </button>
+          )}
+          <button type="button" onClick={() => { onEstado(); setOpen(false) }} className={itemClass}>
+            <Truck className="w-4 h-4 text-blue-600" />
+            Cambiar estado
           </button>
-          <button
-            type="button"
-            onClick={() => { onViewPdf(pedidoId, true); setOpen(false) }}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900 transition-colors"
-          >
-            <FileText className="w-3.5 h-3.5 text-gray-400" />
-            Sin valores
+          {puedePagar && (
+            <button type="button" onClick={() => { onRegistrarPago(); setOpen(false) }} className={itemClass}>
+              <CreditCard className="w-4 h-4 text-emerald-600" />
+              Registrar pago
+            </button>
+          )}
+          <button type="button" onClick={() => { onViewPdf(pedido.id, false); setOpen(false) }} className={itemClass}>
+            <FileText className="w-4 h-4 text-green-600" />
+            PDF con valores
           </button>
-        </div>
+          <button type="button" onClick={() => { onViewPdf(pedido.id, true); setOpen(false) }} className={itemClass}>
+            <FileText className="w-4 h-4 text-gray-400" />
+            PDF sin valores
+          </button>
+          {isAdmin && noFinalizado && (
+            <button type="button" onClick={() => { onAsignar(); setOpen(false) }} className={itemClass}>
+              <UserPlus className="w-4 h-4 text-teal-600" />
+              Asignar repartidor
+            </button>
+          )}
+          {puedeEliminar && (
+            <button
+              type="button"
+              onClick={() => { onDelete(); setOpen(false) }}
+              className={`${itemClass} border-t border-gray-100 text-red-600 hover:bg-red-50`}
+            >
+              <Trash2 className="w-4 h-4 text-red-600" />
+              Eliminar pedido
+            </button>
+          )}
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   )
 }
 
@@ -167,6 +259,7 @@ export default function PedidosPage() {
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({})
   const [shippingFilter, setShippingFilter] = useState<ShippingFilter>('')
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('')
+  const [sinRepartidor, setSinRepartidor] = useState(false)
   // Período por defecto: último mes (evita cargar los ~1.5k pedidos del año).
   const [periodo, setPeriodo] = useState<string>('mes')
   const [sortBy, setSortBy] = useState<string | null>(null)
@@ -177,16 +270,31 @@ export default function PedidosPage() {
   const [loading, setLoading] = useState(true)
 
   const [selectedPedido, setSelectedPedido] = useState<Pedido | null>(null)
+  const [asignarPedidoId, setAsignarPedidoId] = useState<number | null>(null)
+  const [pagoPedido, setPagoPedido] = useState<Pedido | null>(null)
+
+  // Selección múltiple para cambios de estado masivos.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [bulkStatus, setBulkStatus] = useState<string>('')
+  const [bulkApplying, setBulkApplying] = useState(false)
+  const toggleSelect = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }, [])
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), [])
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [detailTab, setDetailTab] = useState<DetailTab>('detalle')
   const [showEstadoModal, setShowEstadoModal] = useState(false)
   const [nuevoShipping, setNuevoShipping] = useState<string>('')
   const [nuevoPago, setNuevoPago] = useState<string>('')
   const [savingEstado, setSavingEstado] = useState(false)
-  // Pedidos sin pagos: oculta el estado de pago en el modal (revivible: true).
-  const MOSTRAR_ESTADO_PAGO = false as boolean
-  // Lista de pedidos: por ahora solo contadores; filtros+tabla → "Próximamente" (revivible: true).
-  const PEDIDOS_LISTA_ENABLED = false as boolean
+  // Estado de pago reactivado en el flujo de pedidos.
+  const MOSTRAR_ESTADO_PAGO = true as boolean
+  // Listado de pedidos activo (filtros + tabla + acciones).
+  const PEDIDOS_LISTA_ENABLED = true as boolean
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deletingPedido, setDeletingPedido] = useState(false)
   const [transiciones, setTransiciones] = useState<{ shipping: Record<string, string[]>; payment: Record<string, string[]> }>({ shipping: {}, payment: {} })
@@ -196,7 +304,7 @@ export default function PedidosPage() {
   const fetchPedidos = useCallback(async () => {
     setLoading(true)
     try {
-      const params: Record<string, string | number> = {
+      const params: Record<string, string | number | boolean> = {
         search: debouncedSearch,
         page,
         page_size: pageSize,
@@ -205,6 +313,7 @@ export default function PedidosPage() {
       if (sortBy) params.sort_by = sortBy
       if (shippingFilter) params.shipping_status = shippingFilter
       if (paymentFilter) params.payment_status = paymentFilter
+      if (sinRepartidor) params.sin_repartidor = true
       const { desde, hasta } = rangoDePeriodo(periodo)
       if (desde) params.fecha_desde = desde
       if (hasta) params.fecha_hasta = hasta
@@ -220,15 +329,40 @@ export default function PedidosPage() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, page, pageSize, shippingFilter, paymentFilter, periodo, columnFilters, sortBy, sortDir])
+  }, [debouncedSearch, page, pageSize, shippingFilter, paymentFilter, sinRepartidor, periodo, columnFilters, sortBy, sortDir])
 
   useEffect(() => {
     fetchPedidos()
   }, [fetchPedidos])
 
+  // Limpia la selección cuando cambia el conjunto (página/filtros).
+  useEffect(() => { setSelectedIds(new Set()) }, [data])
+
+  const selectAllPage = useCallback(() => {
+    setSelectedIds((prev) => prev.size === data.length ? new Set() : new Set(data.map((p) => p.id)))
+  }, [data])
+
+  // Cambio de estado de despacho masivo (loop sobre la selección).
+  const applyBulk = useCallback(async () => {
+    if (!bulkStatus || selectedIds.size === 0) return
+    setBulkApplying(true)
+    let ok = 0, fail = 0
+    for (const id of Array.from(selectedIds)) {
+      try {
+        await api.patch(`/pedidos/${id}/shipping-status`, { shipping_status: bulkStatus })
+        ok++
+      } catch { fail++ }
+    }
+    setBulkApplying(false)
+    toast.success(`${ok} actualizado${ok === 1 ? '' : 's'}${fail ? `, ${fail} omitido${fail === 1 ? '' : 's'} (transición inválida)` : ''}`)
+    setBulkStatus('')
+    clearSelection()
+    fetchPedidos()
+  }, [bulkStatus, selectedIds, clearSelection, fetchPedidos])
+
   useEffect(() => {
     setPage(1)
-  }, [debouncedSearch, shippingFilter, paymentFilter, periodo])
+  }, [debouncedSearch, shippingFilter, paymentFilter, periodo, sinRepartidor])
 
   useEffect(() => {
     api.get('/pedidos/transiciones')
@@ -397,6 +531,20 @@ export default function PedidosPage() {
 
   const columns = useMemo(() => [
     {
+      key: '_sel',
+      label: 'Sel',
+      sortable: false,
+      render: (_v: unknown, row: Pedido) => (
+        <input
+          type="checkbox"
+          checked={selectedIds.has(row.id)}
+          onChange={() => toggleSelect(row.id)}
+          onClick={(e) => e.stopPropagation()}
+          className="w-4 h-4 text-[#003087] border-gray-300 rounded focus:ring-[#003087]/20 cursor-pointer"
+        />
+      ),
+    },
+    {
       key: 'numero_pedido',
       label: 'N\u00B0 Pedido',
       sortable: true,
@@ -423,6 +571,18 @@ export default function PedidosPage() {
       filterable: true,
       filterType: 'text' as const,
       render: (value: string | null) => value || '-',
+    },
+    {
+      key: 'cliente_zona',
+      label: 'Zona',
+      sortable: false,
+      render: (value: string | null) => (
+        value ? (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[#00AEEF]/10 text-[#0086c3] border border-[#00AEEF]/20">
+            {value}
+          </span>
+        ) : <span className="text-gray-300">-</span>
+      ),
     },
     {
       key: 'fecha',
@@ -483,6 +643,26 @@ export default function PedidosPage() {
       ),
     },
     {
+      key: 'saldo_pendiente',
+      label: 'Saldo Pendiente',
+      sortable: true,
+      filterable: true,
+      filterType: 'number' as const,
+      render: (value: number, row: Pedido) => {
+        const pagado = row.importe_total - value
+        return (
+          <div className="flex flex-col leading-tight">
+            <span className={`font-semibold ${value > 0.009 ? 'text-red-600' : 'text-green-600'}`}>
+              {formatCurrency(value)}
+            </span>
+            {pagado > 0.009 && value > 0.009 && (
+              <span className="text-[10px] text-gray-400">Pagado {formatCurrency(pagado)}</span>
+            )}
+          </div>
+        )
+      },
+    },
+    {
       key: 'shipping_status',
       label: 'Despacho',
       sortable: true,
@@ -507,7 +687,6 @@ export default function PedidosPage() {
         </div>
       ),
     },
-    /* --- OCULTO (revivir): columna Pago — pedidos sin pagos. Ver docs/OCULTO_PARA_REVIVIR.md ---
     {
       key: 'payment_status',
       label: 'Pago',
@@ -529,7 +708,6 @@ export default function PedidosPage() {
         </span>
       ),
     },
-    --- FIN OCULTO --- */
     {
       key: 'repartidor_nombre',
       label: 'Repartidor',
@@ -554,20 +732,6 @@ export default function PedidosPage() {
       filterType: 'text' as const,
       render: (value: string | null) => value || '-',
     },
-    /* --- OCULTO (revivir): columna Saldo — pedidos sin pagos. ---
-    {
-      key: 'saldo_pendiente',
-      label: 'Saldo',
-      sortable: true,
-      filterable: true,
-      filterType: 'number' as const,
-      render: (value: number) => (
-        <span className={`font-medium ${value > 0 ? 'text-red-600' : 'text-green-600'}`}>
-          {formatCurrency(value)}
-        </span>
-      ),
-    },
-    --- FIN OCULTO --- */
     {
       key: 'acciones',
       label: 'Acciones',
@@ -584,42 +748,20 @@ export default function PedidosPage() {
             <Eye className="w-4 h-4" />
           </button>
 
-          <PedidoPdfDropdown pedidoId={row.id} onViewPdf={handleViewPdf} />
-
-          {row.shipping_status !== 'entregado' && row.shipping_status !== 'cancelado' && (
-            <button
-              type="button"
-              onClick={() => router.push(`/dashboard/pedidos/${row.id}/editar`)}
-              className="p-2 text-amber-700 bg-amber-100 rounded-lg hover:bg-amber-200 transition-all hover:scale-105 active:scale-95"
-              title="Editar Pedido"
-            >
-              <Edit className="w-4 h-4" />
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={() => openEstadoModal(row)}
-            className="p-2 text-blue-700 bg-blue-100 rounded-lg hover:bg-blue-200 transition-all hover:scale-105 active:scale-95"
-            title="Cambiar Estado"
-          >
-            <Truck className="w-4 h-4" />
-          </button>
-
-          {(row.shipping_status === 'pendiente' || row.shipping_status === 'en_preparacion') && (
-            <button
-              type="button"
-              onClick={() => openDeleteModal(row)}
-              className="p-2 text-red-700 bg-red-100 rounded-lg hover:bg-red-200 transition-all hover:scale-105 active:scale-95"
-              title="Eliminar Pedido"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
+          <PedidoAccionesMenu
+            pedido={row}
+            isAdmin={isAdmin}
+            onViewPdf={handleViewPdf}
+            onEdit={() => router.push(`/dashboard/pedidos/${row.id}/editar`)}
+            onEstado={() => openEstadoModal(row)}
+            onRegistrarPago={() => setPagoPedido(row)}
+            onAsignar={() => setAsignarPedidoId(row.id)}
+            onDelete={() => openDeleteModal(row)}
+          />
         </div>
       ),
     },
-  ], [router, isAdmin])
+  ], [router, isAdmin, selectedIds, toggleSelect])
 
   return (
     <div className="space-y-6">
@@ -634,9 +776,8 @@ export default function PedidosPage() {
         </div>
         <button
           type="button"
-          disabled
-          title="Próximamente"
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-200 px-5 py-2.5 text-sm font-semibold text-gray-400 cursor-not-allowed"
+          onClick={() => router.push('/dashboard/pedidos/nuevo')}
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#003087] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#002570] transition-colors shadow-sm"
         >
           <Plus className="w-4 h-4" />
           <span>Nuevo Pedido</span>
@@ -689,44 +830,94 @@ export default function PedidosPage() {
         )}
       </div>
 
-      {/* Despacho filter tabs */}
-      <div className="space-y-2">
-        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Despacho</p>
-        <div className="flex flex-wrap gap-2">
-          {SHIPPING_TABS.map((tab) => (
+      {/* Filtros (más prolijos, en tarjeta) */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-gray-400 w-16 shrink-0">Despacho</span>
+          <div className="flex flex-wrap gap-1.5">
+            {SHIPPING_TABS.map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => setShippingFilter(tab.value)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-colors ${shippingFilter === tab.value
+                  ? 'bg-[#003087] text-white border-[#003087]'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  }`}
+              >
+                {tab.label}
+              </button>
+            ))}
             <button
-              key={tab.value}
               type="button"
-              onClick={() => setShippingFilter(tab.value)}
-              className={`px-4 py-1.5 text-sm font-medium rounded-full border transition-colors ${shippingFilter === tab.value
-                ? 'bg-[#003087] text-white border-[#003087]'
-                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+              onClick={() => setSinRepartidor((v) => !v)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full border transition-colors ${sinRepartidor
+                ? 'bg-teal-600 text-white border-teal-600'
+                : 'bg-white text-teal-700 border-teal-200 hover:bg-teal-50'
                 }`}
+              title="Solo pedidos sin repartidor asignado"
             >
-              {tab.label}
+              <UserPlus className="w-3.5 h-3.5" />
+              Sin repartidor
             </button>
-          ))}
+          </div>
         </div>
-        {/* OCULTO (revivir): filtro por estado de Pago — pedidos sin pagos */}
-        {MOSTRAR_ESTADO_PAGO && (<>
-        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide pt-1">Pago</p>
-        <div className="flex flex-wrap gap-2">
-          {PAYMENT_TABS.map((tab) => (
-            <button
-              key={tab.value}
-              type="button"
-              onClick={() => setPaymentFilter(tab.value)}
-              className={`px-4 py-1.5 text-sm font-medium rounded-full border transition-colors ${paymentFilter === tab.value
-                ? 'bg-[#E31837] text-white border-[#E31837]'
-                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        </>)}
+        {MOSTRAR_ESTADO_PAGO && (
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1 border-t border-gray-50">
+            <span className="text-[11px] font-bold uppercase tracking-widest text-gray-400 w-16 shrink-0 pt-2 sm:pt-0">Pago</span>
+            <div className="flex flex-wrap gap-1.5">
+              {PAYMENT_TABS.map((tab) => (
+                <button
+                  key={tab.value}
+                  type="button"
+                  onClick={() => setPaymentFilter(tab.value)}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-colors ${paymentFilter === tab.value
+                    ? 'bg-[#E31837] text-white border-[#E31837]'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                    }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Barra de acciones masivas — se habilita al tildar */}
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[#003087]/20 bg-[#003087]/5 px-4 py-3 shadow-sm">
+          <span className="text-sm font-semibold text-[#003087]">{selectedIds.size} seleccionado{selectedIds.size === 1 ? '' : 's'}</span>
+          <button type="button" onClick={selectAllPage} className="text-xs font-medium text-[#003087] hover:underline">
+            {selectedIds.size === data.length ? 'Quitar todos' : 'Seleccionar todos'}
+          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-sm text-gray-500">Cambiar despacho a:</span>
+            <select
+              value={bulkStatus}
+              onChange={(e) => setBulkStatus(e.target.value)}
+              className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
+            >
+              <option value="">Elegir estado…</option>
+              {['en_preparacion', 'listo_para_despacho', 'en_camino', 'entregado', 'cancelado'].map((s) => (
+                <option key={s} value={s}>{SHIPPING_LABEL[s] || s}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={applyBulk}
+              disabled={!bulkStatus || bulkApplying}
+              className="inline-flex items-center gap-2 px-4 py-1.5 text-sm font-semibold text-white bg-[#003087] rounded-lg hover:bg-[#002570] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {bulkApplying && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+              Aplicar
+            </button>
+            <button type="button" onClick={clearSelection} className="p-1.5 text-gray-400 hover:text-gray-600" title="Limpiar selección">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* DataGrid */}
       <DataGrid
@@ -749,25 +940,62 @@ export default function PedidosPage() {
       </>)}
 
       {/* Detail Modal */}
-      {showDetailModal && selectedPedido && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto mx-4">
-            <div className="flex items-center justify-between px-6 pt-6 pb-4">
-              <h2 className="text-lg font-bold text-gray-900">
-                Detalle del Pedido {selectedPedido.numero_pedido}
-              </h2>
-              <button
-                type="button"
-                onClick={closeDetailModal}
-                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
-              >
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
+      {showDetailModal && selectedPedido && (() => {
+        const p = selectedPedido
+        const sem = p.semaforo ? SEMAFORO_INFO[p.semaforo] : null
+        const totalUnidades = (p.items || []).reduce((s, it) => s + (Number(it.cantidad) || 0), 0)
+        // Fila etiqueta/valor reutilizable (JSX, no componente).
+        const campo = (label: string, value: React.ReactNode, icon?: React.ReactNode) => (
+          <div className="flex items-start gap-2 py-1.5">
+            {icon && <span className="mt-0.5 text-gray-400 shrink-0">{icon}</span>}
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">{label}</p>
+              <div className="text-sm text-gray-900 font-medium break-words">{value || <span className="text-gray-300">—</span>}</div>
             </div>
+          </div>
+        )
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="px-6 pt-5 pb-3 border-b border-gray-100">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3.5 min-w-0">
+                  <div className="h-11 w-1.5 rounded-full bg-gradient-to-b from-[#00AEEF] to-[#003087] shrink-0" />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="text-xl font-bold text-gray-900">Pedido {p.numero_pedido}</h2>
+                      {p.sociedad && (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold uppercase ${SOCIEDAD_BADGE[p.sociedad.toLowerCase()] || 'bg-gray-100 text-gray-600'}`}>{p.sociedad}</span>
+                      )}
+                      {p.tipo_documento && (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${TIPO_DOC_BADGE[p.tipo_documento] || 'bg-gray-100 text-gray-600'}`}>{p.tipo_documento}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap mt-1.5">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${SHIPPING_BADGE[p.shipping_status] || ''}`}>
+                        {SHIPPING_LABEL[p.shipping_status] || p.shipping_status}
+                      </span>
+                      {MOSTRAR_ESTADO_PAGO && (
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${PAYMENT_BADGE[p.payment_status] || ''}`}>
+                          {PAYMENT_LABEL[p.payment_status] || p.payment_status}
+                        </span>
+                      )}
+                      {sem && (
+                        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${sem.text}`}>
+                          <span className={`w-2 h-2 rounded-full ${sem.dot}`} /> {sem.label}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <button type="button" onClick={closeDetailModal} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors shrink-0">
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
 
-            {/* Tabs */}
-            <div className="px-6 border-b border-gray-100">
-              <div className="flex gap-1">
+              {/* Tabs */}
+              <div className="flex gap-1 mt-3 -mb-3">
                 {([
                   { value: 'detalle' as const, label: 'Detalle', icon: ListTree },
                   { value: 'bitacora' as const, label: 'Bitácora', icon: History },
@@ -781,8 +1009,7 @@ export default function PedidosPage() {
                       onClick={() => setDetailTab(tab.value)}
                       className={`inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${activo
                         ? 'border-[#003087] text-[#003087]'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-200'
-                        }`}
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-200'}`}
                     >
                       <Icono className="w-4 h-4" />
                       {tab.label}
@@ -792,164 +1019,135 @@ export default function PedidosPage() {
               </div>
             </div>
 
-            {detailTab === 'bitacora' && (
-              <div className="p-6">
-                <BitacoraPedido pedidoId={selectedPedido.id} />
+            {detailTab === 'bitacora' ? (
+              <div className="p-6 overflow-y-auto">
+                <BitacoraPedido pedidoId={p.id} />
               </div>
-            )}
+            ) : (
+              <>
+                <div className="p-6 overflow-y-auto space-y-5 flex-1">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {/* Cliente y entrega */}
+                    <section className="rounded-2xl border border-gray-100 bg-gray-50/40 p-4">
+                      <h3 className="flex items-center gap-2 text-sm font-bold text-gray-800 mb-2">
+                        <MapPin className="w-4 h-4 text-[#003087]" /> Cliente y entrega
+                      </h3>
+                      <div className="divide-y divide-gray-100">
+                        {campo('Cliente', (
+                          <span className="flex items-center gap-2 flex-wrap">
+                            {p.cliente_nombre || '-'}
+                            {p.cliente_tipo && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 capitalize">{p.cliente_tipo}</span>}
+                          </span>
+                        ), <User className="w-3.5 h-3.5" />)}
+                        {campo('Teléfono', p.cliente_telefono, <Phone className="w-3.5 h-3.5" />)}
+                        {campo('Zona', p.cliente_zona && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-[#00AEEF]/10 text-[#0086c3] border border-[#00AEEF]/20">{p.cliente_zona}</span>
+                        ))}
+                        {campo('Localidad', p.cliente_localidad)}
+                        {campo('Código postal', p.cliente_codigo_postal, <Hash className="w-3.5 h-3.5" />)}
+                        {campo('Provincia', p.cliente_provincia)}
+                        {campo('Domicilio', p.cliente_domicilio)}
+                        {campo('Dirección de entrega', p.direccion_entrega)}
+                        {campo('Transporte', p.transporte, <Truck className="w-3.5 h-3.5" />)}
+                        {campo('Repartidor', p.repartidor_nombre)}
+                        {campo('Fecha de entrega', p.fecha_entrega ? formatDate(p.fecha_entrega) : null, <Calendar className="w-3.5 h-3.5" />)}
+                      </div>
+                    </section>
 
-            {detailTab === 'detalle' && (
-            <div className="p-6 space-y-6">
-              {/* Pedido info */}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                <div>
-                  <p className="text-gray-500">Cliente</p>
-                  <p className="font-medium text-gray-900">
-                    {selectedPedido.cliente_nombre || '-'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500">Vendedor</p>
-                  <p className="font-medium text-gray-900">
-                    {selectedPedido.vendedor_nombre || '-'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500">Tipo de Precio</p>
-                  <span
-                    className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase ${esGrupo(selectedPedido.tipo_precio) ? GRUPO_BADGE[selectedPedido.tipo_precio] : 'bg-gray-100 text-gray-600'
-                      }`}
-                  >
-                    {esGrupo(selectedPedido.tipo_precio) ? GRUPO_LABEL[selectedPedido.tipo_precio] : selectedPedido.tipo_precio || '-'}
-                  </span>
-                </div>
-                <div>
-                  <p className="text-gray-500">Despacho</p>
-                  <span
-                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${SHIPPING_BADGE[selectedPedido.shipping_status] || ''
-                      }`}
-                  >
-                    {SHIPPING_LABEL[selectedPedido.shipping_status] || selectedPedido.shipping_status}
-                  </span>
-                </div>
-                <div>
-                  <p className="text-gray-500">Pago</p>
-                  <span
-                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${PAYMENT_BADGE[selectedPedido.payment_status] || ''
-                      }`}
-                  >
-                    {PAYMENT_LABEL[selectedPedido.payment_status] || selectedPedido.payment_status}
-                  </span>
-                </div>
-                <div>
-                  <p className="text-gray-500">Fecha</p>
-                  <p className="font-medium text-gray-900">
-                    {formatDate(selectedPedido.fecha)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500">Fecha Entrega</p>
-                  <p className="font-medium text-gray-900">
-                    {selectedPedido.fecha_entrega
-                      ? formatDate(selectedPedido.fecha_entrega)
-                      : '-'}
-                  </p>
-                </div>
-                {selectedPedido.transporte && (
-                  <div>
-                    <p className="text-gray-500">Transporte</p>
-                    <p className="font-medium text-gray-900">{selectedPedido.transporte}</p>
+                    {/* Comprobante */}
+                    <section className="rounded-2xl border border-gray-100 bg-gray-50/40 p-4">
+                      <h3 className="flex items-center gap-2 text-sm font-bold text-gray-800 mb-2">
+                        <FileText className="w-4 h-4 text-[#003087]" /> Comprobante
+                      </h3>
+                      <div className="divide-y divide-gray-100">
+                        {campo('Fecha', formatDate(p.fecha), <Calendar className="w-3.5 h-3.5" />)}
+                        {campo('Vendedor', p.vendedor_nombre, <User className="w-3.5 h-3.5" />)}
+                        {campo('Tipo de precio', (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase ${esGrupo(p.tipo_precio) ? GRUPO_BADGE[p.tipo_precio] : 'bg-gray-100 text-gray-600'}`}>
+                            {esGrupo(p.tipo_precio) ? GRUPO_LABEL[p.tipo_precio] : p.tipo_precio || '-'}
+                          </span>
+                        ))}
+                        {campo('Sociedad', p.sociedad && <span className="capitalize">{p.sociedad}</span>, <Building2 className="w-3.5 h-3.5" />)}
+                        {campo('Bultos', p.bultos ? String(p.bultos) : '0', <Package className="w-3.5 h-3.5" />)}
+                        {MOSTRAR_ESTADO_PAGO && campo('Compromiso de pago', p.fecha_compromiso_pago ? formatDate(p.fecha_compromiso_pago) : null, <CreditCard className="w-3.5 h-3.5" />)}
+                        {campo('Despachado', p.despachado ? 'Sí' : 'No')}
+                      </div>
+                    </section>
                   </div>
-                )}
-                {selectedPedido.sociedad && (
-                  <div>
-                    <p className="text-gray-500">Sociedad</p>
-                    <p className="font-medium text-gray-900 capitalize">{selectedPedido.sociedad}</p>
-                  </div>
-                )}
-                <div>
-                  <p className="text-gray-500">Despachado</p>
-                  <p className="font-medium text-gray-900">{selectedPedido.despachado ? 'Sí' : 'No'}</p>
-                </div>
-                <div>
-                  <p className="text-gray-500">Importe Total</p>
-                  <p className="font-bold text-gray-900">
-                    {formatCurrency(selectedPedido.importe_total)}
-                  </p>
-                </div>
-                {selectedPedido.observacion && (
-                  <div className="col-span-2 md:col-span-3">
-                    <p className="text-gray-500">Observaci&oacute;n</p>
-                    <p className="font-medium text-gray-900">
-                      {selectedPedido.observacion}
-                    </p>
-                  </div>
-                )}
-              </div>
 
-              {/* Items table */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-3">
-                  Items del Pedido
-                </h3>
-                <div className="overflow-x-auto border border-gray-200 rounded-lg">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-200">
-                        <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">
-                          Producto
-                        </th>
-                        <th className="px-4 py-2 text-right text-xs font-semibold text-gray-600 uppercase">
-                          Cantidad
-                        </th>
-                        <th className="px-4 py-2 text-right text-xs font-semibold text-gray-600 uppercase">
-                          Precio Unit.
-                        </th>
-                        <th className="px-4 py-2 text-right text-xs font-semibold text-gray-600 uppercase">
-                          Precio Total
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedPedido.items && selectedPedido.items.length > 0 ? (
-                        selectedPedido.items.map((item, idx) => (
-                          <tr
-                            key={item.id ?? idx}
-                            className="border-b border-gray-100"
-                          >
-                            <td className="px-4 py-2 text-gray-900">
-                              {item.producto_nombre || `Producto #${item.producto_id}`}
-                            </td>
-                            <td className="px-4 py-2 text-right text-gray-700">
-                              {item.cantidad}
-                            </td>
-                            <td className="px-4 py-2 text-right text-gray-700">
-                              {formatCurrency(item.precio_unitario)}
-                            </td>
-                            <td className="px-4 py-2 text-right font-semibold text-gray-900">
-                              {formatCurrency(item.precio_total)}
-                            </td>
+                  {p.observacion && (
+                    <section className="rounded-2xl border border-gray-100 bg-amber-50/40 p-4">
+                      <h3 className="text-[11px] uppercase tracking-wide text-amber-700 font-bold mb-1">Observación</h3>
+                      <p className="text-sm text-gray-800 whitespace-pre-wrap">{p.observacion}</p>
+                    </section>
+                  )}
+
+                  {/* Items */}
+                  <div>
+                    <h3 className="flex items-center gap-2 text-sm font-bold text-gray-800 mb-2">
+                      <Package className="w-4 h-4 text-[#003087]" /> Ítems del pedido
+                      <span className="text-xs font-normal text-gray-400">({(p.items || []).length})</span>
+                    </h3>
+                    <div className="overflow-x-auto border border-gray-200 rounded-xl">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-600 uppercase">
+                            <th className="px-4 py-2 text-left">Producto</th>
+                            <th className="px-4 py-2 text-right">Cantidad</th>
+                            <th className="px-4 py-2 text-right">Precio Unit.</th>
+                            <th className="px-4 py-2 text-right">Subtotal</th>
                           </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td
-                            colSpan={4}
-                            className="px-4 py-6 text-center text-gray-400"
-                          >
-                            Sin items
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                        </thead>
+                        <tbody>
+                          {p.items && p.items.length > 0 ? (
+                            p.items.map((item, idx) => (
+                              <tr key={item.id ?? idx} className="border-b border-gray-100 last:border-0">
+                                <td className="px-4 py-2 text-gray-900">{item.producto_nombre || `Producto #${item.producto_id}`}</td>
+                                <td className="px-4 py-2 text-right text-gray-700">
+                                  <span className="inline-flex items-center gap-1.5 justify-end">
+                                    {item.cantidad}
+                                    <span className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide rounded-full border ${item.unidad_venta === 'blister' ? 'text-[#00AEEF] bg-[#00AEEF]/10 border-[#00AEEF]/30' : 'text-gray-500 bg-gray-100 border-gray-200'}`}>
+                                      {item.unidad_venta === 'blister' ? 'Blíster' : 'Caja'}
+                                    </span>
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2 text-right text-gray-700">{formatCurrency(item.precio_unitario)}</td>
+                                <td className="px-4 py-2 text-right font-semibold text-gray-900">{formatCurrency(item.precio_total)}</td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-400">Sin items</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+
+                {/* Footer totales */}
+                <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex items-center justify-between gap-4 flex-wrap">
+                  <div className="text-xs text-gray-500">
+                    {(p.items || []).length} ítem{(p.items || []).length === 1 ? '' : 's'} · {totalUnidades} unidad{totalUnidades === 1 ? '' : 'es'}{p.bultos ? ` · ${p.bultos} bulto${p.bultos === 1 ? '' : 's'}` : ''}
+                  </div>
+                  <div className="flex items-center gap-6">
+                    {MOSTRAR_ESTADO_PAGO && (
+                      <div className="text-right">
+                        <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">Saldo</p>
+                        <p className={`text-sm font-bold ${p.saldo_pendiente > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{formatCurrency(p.saldo_pendiente)}</p>
+                      </div>
+                    )}
+                    <div className="text-right">
+                      <p className="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">Total</p>
+                      <p className="text-lg font-black text-[#003087]">{formatCurrency(p.importe_total)}</p>
+                    </div>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </div>
-      )}
+        )
+      })()}
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && selectedPedido && (
@@ -1121,6 +1319,20 @@ export default function PedidosPage() {
           </div>
         </div>
       )}
+
+      <AsignarRepartidorModal
+        pedidoId={asignarPedidoId ?? 0}
+        isOpen={asignarPedidoId !== null}
+        onClose={() => setAsignarPedidoId(null)}
+        onSuccess={() => { setAsignarPedidoId(null); fetchPedidos() }}
+      />
+
+      <RegistrarPagoPedidoModal
+        pedido={pagoPedido}
+        open={pagoPedido !== null}
+        onClose={() => setPagoPedido(null)}
+        onSuccess={fetchPedidos}
+      />
     </div>
   )
 }

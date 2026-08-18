@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { DollarSign, Package, Users, CreditCard, ClipboardList, FileText, ChevronLeft, ChevronRight, AlertTriangle, UserX, PackageX, Construction } from 'lucide-react'
+import { DollarSign, Package, Users, CreditCard, ClipboardList, FileText, ChevronLeft, ChevronRight, AlertTriangle, UserX, PackageX, Construction, ShoppingCart, HandCoins } from 'lucide-react'
 import api from '@/lib/api'
 import { DashboardVentas, DashboardAdmin } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { rangoDePeriodo } from '@/lib/periodos'
+import PeriodoSelect from '@/components/ui/PeriodoSelect'
 import toast from 'react-hot-toast'
 import { useAuth } from '@/hooks/useAuth'
 import StatCard from '@/components/dashboard/StatCard'
@@ -57,11 +59,14 @@ const PAGO_ESTADO_BADGE: Record<string, string> = {
 function VentasDashboard() {
   const [data, setData] = useState<DashboardVentas | null>(null)
   const [loading, setLoading] = useState(true)
+  const [periodo, setPeriodo] = useState('mes')
 
   useEffect(() => {
     const fetchData = async () => {
+      setLoading(true)
       try {
-        const res = await api.get<DashboardVentas>('/dashboard/ventas')
+        const { desde, hasta } = rangoDePeriodo(periodo)
+        const res = await api.get<DashboardVentas>('/dashboard/ventas', { params: { desde, hasta } })
         setData(res.data)
       } catch {
         toast.error('Error al cargar el dashboard')
@@ -70,7 +75,7 @@ function VentasDashboard() {
       }
     }
     fetchData()
-  }, [])
+  }, [periodo])
 
   if (loading || !data) return <SkeletonGrid />
 
@@ -79,21 +84,28 @@ function VentasDashboard() {
     value,
   }))
 
-
+  const pctCobrado = data.importe_vendido > 0
+    ? Math.round((data.importe_cobrado / data.importe_vendido) * 100)
+    : 0
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-end">
+        <PeriodoSelect value={periodo} onChange={setPeriodo} />
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="Importe Total Vendido"
-          value={formatCurrency(data.total_vendido)}
+          title="Ventas"
+          value={formatCurrency(data.importe_vendido)}
+          secondaryLabel={`Cobrado (${pctCobrado}%)`}
+          secondaryValue={formatCurrency(data.importe_cobrado)}
           icon={DollarSign}
           color="blue"
         />
         <StatCard
-          title="Pedidos del Mes"
-          value={data.pedidos_mes}
-          icon={Package}
+          title="Pedidos"
+          value={data.total_pedidos}
+          icon={ShoppingCart}
           color="blue"
         />
         <StatCard
@@ -108,13 +120,6 @@ function VentasDashboard() {
           icon={Users}
           color="green"
         />
-        <StatCard
-          title="Cobros del Mes"
-          value={formatCurrency(data.cobros_mes)}
-          icon={CreditCard}
-          color="cyan"
-        />
-
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -191,7 +196,7 @@ function buildMonthOptions(count = 12) {
   return opts
 }
 
-function AdminDashboard({ mes, onLoadingChange }: { mes: string; onLoadingChange?: (v: boolean) => void }) {
+function AdminDashboard({ mes, desde, hasta, onLoadingChange }: { mes: string; desde?: string; hasta?: string; onLoadingChange?: (v: boolean) => void }) {
   const [data, setData] = useState<DashboardAdmin | null>(null)
   const [loading, setLoading] = useState(true)
   const [stockBajoPage, setStockBajoPage] = useState(1)
@@ -201,7 +206,7 @@ function AdminDashboard({ mes, onLoadingChange }: { mes: string; onLoadingChange
     const fetchData = async () => {
       setLoading(true)
       try {
-        const res = await api.get<DashboardAdmin>('/dashboard/admin', { params: { mes } })
+        const res = await api.get<DashboardAdmin>('/dashboard/admin', { params: { mes, desde, hasta } })
         setData(res.data)
       } catch {
         toast.error('Error al cargar el dashboard')
@@ -210,7 +215,7 @@ function AdminDashboard({ mes, onLoadingChange }: { mes: string; onLoadingChange
       }
     }
     fetchData()
-  }, [mes])
+  }, [mes, desde, hasta])
 
   // Reporta el estado de carga al header (para el selector de periodo)
   useEffect(() => {
@@ -236,22 +241,26 @@ function AdminDashboard({ mes, onLoadingChange }: { mes: string; onLoadingChange
       {/* Main Stats - Al ancho completo */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="Ventas Totales Mes"
-          value={formatCurrency(data.ventas_totales)}
+          title="Ventas"
+          value={formatCurrency(data.importe_vendido)}
+          secondaryLabel={`Cobrado (${data.importe_vendido > 0 ? Math.round((data.importe_cobrado / data.importe_vendido) * 100) : 0}%)`}
+          secondaryValue={formatCurrency(data.importe_cobrado)}
           icon={DollarSign}
           color="green"
         />
         <StatCard
-          title="Pedidos del Mes"
-          value={data.pedidos_totales}
-          icon={ClipboardList}
-          color="cyan"
+          title="Compras"
+          value={formatCurrency(data.importe_comprado)}
+          secondaryLabel={`Pagado (${data.importe_comprado > 0 ? Math.round((data.importe_pagado / data.importe_comprado) * 100) : 0}%)`}
+          secondaryValue={formatCurrency(data.importe_pagado)}
+          icon={ShoppingCart}
+          color="purple"
         />
         <StatCard
-          title="Pedidos Cancelados"
-          value={data.pedidos_cancelados}
-          icon={PackageX}
-          color="red"
+          title="Pedidos"
+          value={data.total_pedidos}
+          icon={ClipboardList}
+          color="cyan"
         />
         <StatCard
           title="Cobros del Mes"
@@ -392,12 +401,15 @@ function AdminDashboard({ mes, onLoadingChange }: { mes: string; onLoadingChange
 
 export default function DashboardPage() {
   const { user, isLoading } = useAuth()
-  const [mes, setMes] = useState<string>(currentMonthValue())
+  const [periodo, setPeriodo] = useState('mes')
   const [dashLoading, setDashLoading] = useState(false)
-  const monthOptions = useMemo(() => buildMonthOptions(12), [])
   // Interruptor del contenido del dashboard. false = placeholder "en preparación"
   // (no se elimina nada). Poner en true para revivir el panel. Ver docs/OCULTO_PARA_REVIVIR.md
-  const DASHBOARD_CONTENT_ENABLED = false
+  const DASHBOARD_CONTENT_ENABLED = true
+
+  // Rango del período elegido + mes calendario derivado (para los gráficos históricos).
+  const { desde, hasta } = rangoDePeriodo(periodo)
+  const mes = /^\d{4}-\d{2}$/.test(periodo) ? periodo : currentMonthValue()
 
   if (isLoading) return <SkeletonGrid />
 
@@ -405,6 +417,9 @@ export default function DashboardPage() {
 
   if (role === 'repartidor') {
     redirect('/dashboard/entregas')
+  }
+  if (role === 'operaciones') {
+    redirect('/dashboard/preparacion')
   }
 
   const isAdmin = role === 'admin' || role === 'super_admin'
@@ -433,22 +448,7 @@ export default function DashboardPage() {
                 Actualizando…
               </span>
             )}
-            <label htmlFor="dashboard-mes" className="text-sm font-medium text-gray-600">
-              Periodo
-            </label>
-            <select
-              id="dashboard-mes"
-              value={mes}
-              onChange={(e) => setMes(e.target.value)}
-              disabled={dashLoading}
-              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm focus:border-[#003087] focus:outline-none focus:ring-1 focus:ring-[#003087] disabled:opacity-60"
-            >
-              {monthOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+            <PeriodoSelect value={periodo} onChange={setPeriodo} />
           </div>
         )}
       </div>
@@ -456,7 +456,7 @@ export default function DashboardPage() {
       {DASHBOARD_CONTENT_ENABLED ? (
         <>
           {role === 'ventas' && <VentasDashboard />}
-          {isAdmin && <AdminDashboard mes={mes} onLoadingChange={setDashLoading} />}
+          {isAdmin && <AdminDashboard mes={mes} desde={desde} hasta={hasta} onLoadingChange={setDashLoading} />}
         </>
       ) : (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white/60 py-20 text-center">

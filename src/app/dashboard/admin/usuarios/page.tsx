@@ -14,6 +14,16 @@ const ROL_BADGE: Record<string, string> = {
   admin: 'bg-purple-100 text-purple-700',
   ventas: 'bg-blue-100 text-blue-700',
   repartidor: 'bg-orange-100 text-orange-700',
+  operaciones: 'bg-teal-100 text-teal-700',
+}
+
+// El value 'repartidor' se conserva; solo cambia la etiqueta visible a "Logística".
+const ROL_LABEL: Record<string, string> = {
+  super_admin: 'Super Admin',
+  admin: 'Administrador',
+  ventas: 'Ventas',
+  repartidor: 'Logística',
+  operaciones: 'Operaciones',
 }
 
 interface UserForm {
@@ -21,7 +31,7 @@ interface UserForm {
   email: string
   username: string
   password: string
-  rol: 'super_admin' | 'admin' | 'ventas' | 'repartidor'
+  rol: 'super_admin' | 'admin' | 'ventas' | 'repartidor' | 'operaciones'
   activo: boolean
   comision_generico: number
   comision_otc: number
@@ -238,11 +248,12 @@ export default function AdminUsuariosPage() {
         { label: 'Super Admin', value: 'super_admin' },
         { label: 'Admin', value: 'admin' },
         { label: 'Ventas', value: 'ventas' },
-        { label: 'Repartidor', value: 'repartidor' }
+        { label: 'Logística', value: 'repartidor' },
+        { label: 'Operaciones', value: 'operaciones' }
       ],
       render: (value: string) => (
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${ROL_BADGE[value] || 'bg-gray-100 text-gray-700'}`}>
-          {value}
+        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${ROL_BADGE[value] || 'bg-gray-100 text-gray-700'}`}>
+          {ROL_LABEL[value] || value}
         </span>
       ),
     },
@@ -424,7 +435,8 @@ export default function AdminUsuariosPage() {
                   <option value="super_admin">Super Admin</option>
                   <option value="admin">Admin</option>
                   <option value="ventas">Ventas</option>
-                  <option value="repartidor">Repartidor</option>
+                  <option value="repartidor">Logística</option>
+                  <option value="operaciones">Operaciones</option>
                 </select>
               </div>
 

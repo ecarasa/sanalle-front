@@ -1,10 +1,22 @@
 'use client'
 
 import { useAuth } from '@/hooks/useAuth'
-import { Landmark, MapPin, Clock, Tag, Globe, Package, Box, Receipt, Truck, Users, FlaskConical } from 'lucide-react'
+import { Landmark, MapPin, Receipt, Truck, FlaskConical, Map as MapPinned, Warehouse, Tags } from 'lucide-react'
 import Link from 'next/link'
 
 const sections = [
+  {
+    title: 'Parámetros / Combos',
+    description: 'Los valores de los desplegables de la app, en un solo lugar',
+    items: [
+      {
+        title: 'Entidades / Combos',
+        description: 'Condición de pago, transporte, sociedad, tipo de precio y más',
+        href: '/dashboard/admin/entidades',
+        icon: Tags,
+      },
+    ],
+  },
   {
     title: 'Productos',
     description: 'Tablas necesarias para cargar y gestionar productos',
@@ -21,12 +33,24 @@ const sections = [
         href: '/dashboard/admin/tablas/laboratorios',
         icon: FlaskConical,
       },
+      {
+        title: 'Depósitos',
+        description: 'Depósitos de stock',
+        href: '/dashboard/admin/depositos',
+        icon: Warehouse,
+      },
     ],
   },
   {
     title: 'Clientes',
     description: 'Tablas para la gestión de clientes',
     items: [
+      {
+        title: 'Zonas',
+        description: 'Zonas de reparto (Norte, Sur, Este…)',
+        href: '/dashboard/admin/tablas/zonas',
+        icon: MapPinned,
+      },
       {
         title: 'Localidades',
         description: 'Localidades, provincias y CP',
@@ -46,8 +70,8 @@ const sections = [
         icon: Landmark,
       },
       {
-        title: 'Tipo IVA',
-        description: 'Condiciones de IVA y tasas',
+        title: 'Percepciones / IVA',
+        description: 'Conceptos impositivos para las compras (IVA, IIBB…)',
         href: '/dashboard/admin/tablas/tipo-iva',
         icon: Receipt,
       },

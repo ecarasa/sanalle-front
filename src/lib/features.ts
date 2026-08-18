@@ -20,7 +20,8 @@ export const FEATURES: FeatureDef[] = [
   { key: 'catalogo', label: 'Catálogo', grupo: 'General', href: '/catalogo' },
   { key: 'mis_ventas', label: 'Ventas (vendedores)', grupo: 'General', href: '/dashboard/mis-ventas' },
   { key: 'reportes', label: 'Reportes', grupo: 'General', href: '/dashboard/reportes' },
-  { key: 'cuenta_sanalle', label: 'Cuenta Sanalle', grupo: 'General', href: '/dashboard/admin/cuenta-sanalle' },
+  { key: 'novedades', label: 'Novedades / Changelog', grupo: 'General', href: '/dashboard/novedades' },
+  { key: 'chat', label: 'Chat interno', grupo: 'General', href: '/dashboard/chat' },
   // Operaciones
   { key: 'clientes', label: 'Clientes', grupo: 'Operaciones', href: '/dashboard/clientes' },
   { key: 'pedidos', label: 'Pedidos', grupo: 'Operaciones', href: '/dashboard/pedidos' },
@@ -31,9 +32,12 @@ export const FEATURES: FeatureDef[] = [
   { key: 'admin_clientes', label: 'Gestión de Clientes', grupo: 'Administración', href: '/dashboard/admin/clientes' },
   { key: 'admin_productos', label: 'Gestión de Productos', grupo: 'Administración', href: '/dashboard/admin/productos' },
   { key: 'admin_proveedores', label: 'Gestión de Proveedores', grupo: 'Administración', href: '/dashboard/admin/proveedores' },
+  { key: 'admin_pagos_proveedor', label: 'Pagos a proveedor', grupo: 'Administración', href: '/dashboard/admin/pagos-proveedor' },
   { key: 'admin_notas', label: 'Notas NC/ND', grupo: 'Administración', href: '/dashboard/admin/notas-credito-debito' },
   { key: 'admin_tablas', label: 'Tablas', grupo: 'Administración', href: '/dashboard/admin/tablas' },
   { key: 'admin_usuarios', label: 'Usuarios', grupo: 'Administración', href: '/dashboard/admin/usuarios' },
+  { key: 'admin_configuracion', label: 'Configuración general', grupo: 'Administración', href: '/dashboard/admin/configuracion' },
+  { key: 'transacciones', label: 'Transacciones', grupo: 'Administración', href: '/dashboard/transacciones' },
   {
     key: 'ajuste_stock_manual',
     label: 'Ajuste manual de stock',

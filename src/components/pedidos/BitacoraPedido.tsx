@@ -26,6 +26,7 @@ const CAMPO_LABEL: Record<string, string> = {
   tipo_precio: 'Lista de precios',
   cantidad_cajas: 'Cantidad (cajas)',
   cantidad_blisters: 'Cantidad (blísters)',
+  unidad_venta: 'Unidad de venta',
   precio_unitario: 'Precio unitario',
   precio_lista: 'Precio de lista',
   descuento_porcentaje: 'Descuento %',

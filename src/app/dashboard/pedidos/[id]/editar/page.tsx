@@ -51,17 +51,24 @@ export default function EditarPedidoPage() {
   }
 
   // Format initial items correctly from the loaded data
-  const initialItems = pedido.items?.map((item: any) => ({
-    producto_id: item.producto_id,
-    producto_nombre: item.producto_nombre || 'Producto Desconocido',
-    presentacion: item.presentacion || null,
-    cantidad: item.cantidad,
-    precio_lista: item.precio_lista ?? null,
-    descuento_porcentaje: item.descuento_porcentaje ?? null,
-    precio_unitario: item.precio_unitario,
-    precio_total: item.precio_total,
-    producto_precios: item.producto_precios ?? {},
-  })) || []
+  const initialItems = pedido.items?.map((item) => {
+    const unidad: 'caja' | 'blister' = item.unidad_venta === 'blister' ? 'blister' : 'caja'
+    // La cantidad mostrada es la de la unidad de venta de la línea.
+    const cantidad = unidad === 'blister' ? (item.cantidad_blisters ?? 0) : (item.cantidad ?? item.cantidad_cajas ?? 0)
+    return {
+      producto_id: item.producto_id,
+      producto_nombre: item.producto_nombre || 'Producto Desconocido',
+      presentacion: item.presentacion || null,
+      cantidad,
+      unidad_venta: unidad,
+      precio_lista: item.precio_lista ?? null,
+      descuento_porcentaje: item.descuento_porcentaje ?? null,
+      precio_unitario: item.precio_unitario,
+      precio_total: item.precio_total,
+      producto_precios: item.producto_precios ?? {},
+      blisters_por_caja: item.blisters_por_caja ?? null,
+    }
+  }) || []
 
   return (
     <PedidoForm
@@ -72,10 +79,16 @@ export default function EditarPedidoPage() {
       vendedorNombre={pedido.vendedor_nombre || ''}
       initialVendedorId={pedido.vendedor_id}
       fechaCreacion={new Date(pedido.fecha).toLocaleDateString('es-AR')}
+      initialFecha={pedido.fecha || null}
       initialTipoDocumento={pedido.tipo_documento || 'remito'}
       initialFechaEntrega={pedido.fecha_entrega || null}
       initialObservacion={pedido.observacion || ''}
       initialTransporte={pedido.transporte}
+      initialDireccionEntrega={pedido.direccion_entrega}
+      clienteDomicilio={pedido.cliente_domicilio}
+      clienteLocalidad={pedido.cliente_localidad}
+      clienteCodigoPostal={pedido.cliente_codigo_postal}
+      clienteProvincia={pedido.cliente_provincia}
       initialSociedad={pedido.sociedad}
       initialFechaCompromisoPago={pedido.fecha_compromiso_pago}
       initialDespachado={pedido.despachado}

@@ -24,6 +24,9 @@ interface ProductoForm {
   comprimidos_por_blister: string
   blisters_por_caja: string
   status: string
+  vende_caja: boolean
+  vende_blister: boolean
+  vende_comprimido: boolean
   pvp: string
   margen_minorista: string
   margen_mayorista: string
@@ -56,6 +59,9 @@ const emptyForm: ProductoForm = {
   comprimidos_por_blister: '',
   blisters_por_caja: '',
   status: 'activo',
+  vende_caja: true,
+  vende_blister: false,
+  vende_comprimido: false,
   pvp: '',
   margen_minorista: CATEGORY_MARGINS.GENERICO.margen_minorista ?? '',
   margen_mayorista: CATEGORY_MARGINS.GENERICO.margen_mayorista ?? '',
@@ -160,6 +166,9 @@ export default function ProductoModal({ open, editingProducto, proveedores, labo
         comprimidos_por_blister: editingProducto.comprimidos_por_blister != null ? String(editingProducto.comprimidos_por_blister) : '',
         blisters_por_caja: editingProducto.blisters_por_caja != null ? String(editingProducto.blisters_por_caja) : '',
         status: editingProducto.status || 'activo',
+        vende_caja: (editingProducto as any).vende_caja ?? true,
+        vende_blister: (editingProducto as any).vende_blister ?? false,
+        vende_comprimido: (editingProducto as any).vende_comprimido ?? false,
         pvp: editingProducto.pvp != null ? String(editingProducto.pvp) : '',
         margen_minorista: editingProducto.margen_minorista != null ? String(editingProducto.margen_minorista) : '',
         margen_mayorista: editingProducto.margen_mayorista != null ? String(editingProducto.margen_mayorista) : '',
@@ -258,6 +267,9 @@ export default function ProductoModal({ open, editingProducto, proveedores, labo
         comprimidos_por_blister: form.comprimidos_por_blister ? parseInt(form.comprimidos_por_blister) : null,
         blisters_por_caja: form.blisters_por_caja ? parseInt(form.blisters_por_caja) : null,
         status: form.activo ? 'activo' : 'inactivo',
+        vende_caja: form.vende_caja,
+        vende_blister: form.vende_blister,
+        vende_comprimido: form.vende_comprimido,
         pvp: form.pvp ? parseFloat(form.pvp) : null,
         margen_minorista: form.margen_minorista ? parseFloat(form.margen_minorista) : null,
         margen_mayorista: form.margen_mayorista ? parseFloat(form.margen_mayorista) : null,
@@ -527,6 +539,43 @@ export default function ProductoModal({ open, editingProducto, proveedores, labo
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
                 />
               </div>
+            </div>
+
+            {/* Formato de venta: en qué unidades se puede vender */}
+            <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Formato de venta</p>
+              <div className="flex flex-wrap gap-4">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.vende_caja}
+                    onChange={(e) => setForm({ ...form, vende_caja: e.target.checked })}
+                    className="w-4 h-4 text-[#003087] border-gray-300 rounded focus:ring-[#003087]/20"
+                  />
+                  Caja / Expendedor
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.vende_blister}
+                    onChange={(e) => setForm({ ...form, vende_blister: e.target.checked })}
+                    className="w-4 h-4 text-[#003087] border-gray-300 rounded focus:ring-[#003087]/20"
+                  />
+                  Blíster
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm text-gray-400 cursor-pointer" title="Reservado para catálogo (aún no disponible como unidad de pedido)">
+                  <input
+                    type="checkbox"
+                    checked={form.vende_comprimido}
+                    onChange={(e) => setForm({ ...form, vende_comprimido: e.target.checked })}
+                    className="w-4 h-4 text-[#003087] border-gray-300 rounded focus:ring-[#003087]/20"
+                  />
+                  Comprimido
+                </label>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-2">
+                Ej.: expendedor cargado por caja pero vendido solo por blíster → destildá &quot;Caja&quot; y tildá &quot;Blíster&quot;.
+              </p>
             </div>
 
             {/* Stock A */}

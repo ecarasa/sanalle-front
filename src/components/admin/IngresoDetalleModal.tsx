@@ -211,13 +211,25 @@ export default function IngresoDetalleModal({ ingreso, onClose, onUpdate }: Prop
             )}
           </div>
 
-          {/* Financial summary */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-[#003087]/5 rounded-xl p-4 border border-[#003087]/10">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Importe Total</p>
-              <p className="text-2xl font-black text-[#003087] mt-1">{formatCurrency(ingreso.importe_total)}</p>
+          {/* Desglose: neto + impuestos + total */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="rounded-xl border border-gray-100 p-4 space-y-1.5 text-sm">
+              <div className="flex justify-between text-gray-600">
+                <span>Subtotal neto</span>
+                <span className="font-medium">{formatCurrency(ingreso.subtotal_neto ?? 0)}</span>
+              </div>
+              {ingreso.impuestos?.map((imp) => (
+                <div key={imp.id} className="flex justify-between text-gray-600">
+                  <span>{imp.concepto}{imp.tasa ? ` (${Number(imp.tasa)}%)` : ''}</span>
+                  <span className="font-medium">{formatCurrency(imp.importe)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between text-base font-bold text-gray-900 pt-1.5 border-t border-gray-200">
+                <span>Total</span>
+                <span className="text-[#003087]">{formatCurrency(ingreso.importe_total)}</span>
+              </div>
             </div>
-            <div className={`rounded-xl p-4 border ${
+            <div className={`rounded-xl p-4 border flex flex-col justify-center ${
               ingreso.saldo_pendiente > 0
                 ? 'bg-amber-50 border-amber-200'
                 : 'bg-green-50 border-green-200'

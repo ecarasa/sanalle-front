@@ -124,6 +124,8 @@ export default function MapaEntregas({ fecha }: Props) {
     } catch { return null }
   })
   const [terminandoRecorrido, setTerminandoRecorrido] = useState(false)
+  const [despachando, setDespachando] = useState(false)
+  const [refreshTick, setRefreshTick] = useState(0)
 
   // ── Fetch puntos del backend ──────────────────────────────────────────────
   useEffect(() => {
@@ -134,11 +136,13 @@ export default function MapaEntregas({ fecha }: Props) {
     setZonaActiva(null)
     setCacheRutas({})
 
+    // Incluye 'listo_para_despacho' y 'en_camino' (default del backend): permite
+    // PLANIFICAR la ruta antes de despachar.
     api.get<PuntoEntrega[]>('/pedidos/rutas_entregas', { params: { fecha } })
       .then(res => setPuntos(res.data))
       .catch(() => setError('No se pudieron cargar las rutas de entrega.'))
       .finally(() => setLoading(false))
-  }, [fecha])
+  }, [fecha, refreshTick])
 
   // ── Zonas únicas extraídas de los puntos ─────────────────────────────────
   const zonas = useMemo(() => {
@@ -202,7 +206,7 @@ export default function MapaEntregas({ fecha }: Props) {
 
     const pedidosIds = clientesAgrupados.flatMap(c => c.pedidos.map(p => p.pedido_id));
 
-    api.post('/pedidos/optimizar_ruta', { coordenadas: coordenadasPayload, pedidos_ids: pedidosIds })
+    api.post('/pedidos/optimizar_ruta', { coordenadas: coordenadasPayload, pedidos_ids: pedidosIds, fecha })
       .then(res => {
         const { coords, km, tiempo_minutos, waypoints, tramos } = res.data
 
@@ -263,6 +267,42 @@ export default function MapaEntregas({ fecha }: Props) {
       alert('Error al terminar el recorrido.')
     } finally {
       setTerminandoRecorrido(false)
+    }
+  }
+
+  // IDs de pedidos de la ruta visible, en el orden óptimo.
+  const pedidoIdsRuta = clientesVisibles.flatMap(c => c.pedidos.map(p => p.pedido_id))
+
+  // Despachar la ruta en masa: los 'listo_para_despacho' pasan a 'en_camino'.
+  async function handleDespacharRuta() {
+    if (pedidoIdsRuta.length === 0) return
+    setDespachando(true)
+    try {
+      const res = await api.post('/pedidos/despachar-ruta', { pedido_ids: pedidoIdsRuta })
+      const n = res.data?.despachados ?? 0
+      setCacheRutas({})
+      setRefreshTick(t => t + 1)
+      alert(`${n} pedido(s) despachado(s) (en camino).`)
+    } catch {
+      alert('Error al despachar la ruta.')
+    } finally {
+      setDespachando(false)
+    }
+  }
+
+  // Descargar la hoja de ruta (PDF) con las paradas en el orden óptimo.
+  async function handleHojaRuta() {
+    if (pedidoIdsRuta.length === 0) return
+    try {
+      const res = await api.post(
+        '/pedidos/hoja-ruta',
+        { pedido_ids: pedidoIdsRuta, fecha },
+        { responseType: 'blob' }
+      )
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }))
+      window.open(url, '_blank')
+    } catch {
+      alert('No se pudo generar la hoja de ruta.')
     }
   }
 
@@ -379,6 +419,40 @@ export default function MapaEntregas({ fecha }: Props) {
                 <path fill="#FBBC05" d="M24 10c-3.314 0-6 2.686-6 6s2.686 6 6 6 6-2.686 6-6-2.686-6-6-6z"/>
               </svg>
               <span>Abrir en Google Maps</span>
+            </button>
+          )}
+
+          {/* Hoja de ruta imprimible (orden óptimo de paradas) */}
+          {pedidoIdsRuta.length > 0 && (
+            <button
+              onClick={handleHojaRuta}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white border border-gray-200 text-gray-700 text-sm font-bold hover:bg-gray-50 hover:border-gray-300 transition-all duration-200 shadow-sm active:scale-[0.98]"
+              title="Descargar hoja de ruta (PDF)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M5 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2H5zm0 1h6a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/>
+                <path d="M6 4h4v1H6V4zm0 3h4v1H6V7zm0 3h3v1H6v-1z"/>
+              </svg>
+              <span>Hoja de ruta</span>
+            </button>
+          )}
+
+          {/* Despachar la ruta en masa: listo_para_despacho -> en_camino */}
+          {puntosFiltrados.some(p => p.estado === 'listo_para_despacho') && (
+            <button
+              onClick={handleDespacharRuta}
+              disabled={despachando}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#00AEEF] text-white text-sm font-bold hover:bg-[#0093D4] transition-all duration-200 shadow-sm active:scale-[0.98] disabled:opacity-60"
+              title="Despachar toda la ruta (pasa a 'en camino')"
+            >
+              {despachando ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                  <path d="M0 3.5A1.5 1.5 0 0 1 1.5 2h9A1.5 1.5 0 0 1 12 3.5V5h1.02a1.5 1.5 0 0 1 1.17.563l1.481 1.85a1.5 1.5 0 0 1 .329.938V10.5a1.5 1.5 0 0 1-1.5 1.5H14a2 2 0 1 1-4 0H5a2 2 0 1 1-3.998-.085A1.5 1.5 0 0 1 0 10.5v-7zM12 10a2 2 0 0 1 1.732 1h.768a.5.5 0 0 0 .5-.5V8.35a.5.5 0 0 0-.11-.312l-1.48-1.85A.5.5 0 0 0 13.02 6H12v4zm-9 1a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm9 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/>
+                </svg>
+              )}
+              <span>Despachar ruta</span>
             </button>
           )}
 

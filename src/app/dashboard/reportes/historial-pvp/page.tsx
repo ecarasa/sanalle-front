@@ -1,16 +1,18 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { 
-  Search, 
-  Loader2, 
-  TrendingUp, 
-  TrendingDown, 
-  Minus, 
-  History, 
-  Package, 
+import {
+  Search,
+  Loader2,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  History,
+  Package,
   ArrowRight,
-  Info
+  Info,
+  ChevronDown,
+  ArrowUpNarrowWide,
 } from 'lucide-react'
 import api from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -30,11 +32,41 @@ interface HistorialPvpResponse {
   historial: HistorialPvpRow[]
 }
 
+interface AumentoProducto {
+  producto_id: number
+  producto_nombre: string
+  producto_codigo: string
+  pvp_anterior: number
+  pvp_nuevo: number
+  variacion_porcentaje: number
+}
+
+interface AumentoGrupo {
+  fecha: string
+  cantidad_productos: number
+  variacion_promedio: number
+  variacion_promedio_aumentos: number
+  variacion_min: number
+  variacion_max: number
+  productos: AumentoProducto[]
+}
+
 export default function HistorialPvpPage() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState<HistorialPvpResponse[]>([])
   const [hasSearched, setHasSearched] = useState(false)
+
+  const [aumentos, setAumentos] = useState<AumentoGrupo[]>([])
+  const [loadingAumentos, setLoadingAumentos] = useState(true)
+  const [expandedFecha, setExpandedFecha] = useState<string | null>(null)
+
+  useEffect(() => {
+    api.get<AumentoGrupo[]>('/reportes/aumentos', { params: { dias: 365, limit: 30 } })
+      .then((res) => setAumentos(res.data))
+      .catch(() => setAumentos([]))
+      .finally(() => setLoadingAumentos(false))
+  }, [])
 
   const fetchData = useCallback(async (searchTerm: string) => {
     if (!searchTerm || searchTerm.length < 3) {
@@ -106,6 +138,102 @@ export default function HistorialPvpPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+      </div>
+
+      {/* Cuadro discriminado de Aumentos (por lote/día) */}
+      <div className="bg-white rounded-[2rem] shadow-xl border border-gray-100 overflow-hidden">
+        <div className="flex items-center justify-between px-8 py-6 border-b border-gray-50 bg-gray-50/50">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-emerald-500 rounded-lg">
+              <ArrowUpNarrowWide className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-lg font-black text-gray-900">Aumentos de PVP</h2>
+              <p className="text-xs text-gray-500">Cambios de precio agrupados por fecha, con % y productos afectados</p>
+            </div>
+          </div>
+          <span className="text-[11px] font-bold uppercase tracking-widest text-gray-400">Último año</span>
+        </div>
+
+        {loadingAumentos ? (
+          <div className="flex items-center justify-center py-16 text-gray-400">
+            <Loader2 className="w-8 h-8 animate-spin text-[#003087]" />
+          </div>
+        ) : aumentos.length === 0 ? (
+          <div className="py-16 text-center text-gray-400">
+            <Info className="w-8 h-8 mx-auto mb-3 opacity-20" />
+            <p className="text-sm">No se registraron aumentos de PVP en el período.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-50">
+            {aumentos.map((grupo) => (
+              <div key={grupo.fecha}>
+                <button
+                  type="button"
+                  onClick={() => setExpandedFecha(expandedFecha === grupo.fecha ? null : grupo.fecha)}
+                  className={`w-full grid grid-cols-12 gap-4 items-center px-8 py-5 text-left transition-colors hover:bg-emerald-50/30 ${expandedFecha === grupo.fecha ? 'bg-emerald-50/40' : ''}`}
+                >
+                  <div className="col-span-1">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${expandedFecha === grupo.fecha ? 'bg-emerald-600 text-white rotate-180' : 'bg-gray-100 text-gray-400'}`}>
+                      <ChevronDown className="w-5 h-5" />
+                    </div>
+                  </div>
+                  <div className="col-span-4">
+                    <p className="text-sm font-bold text-gray-900">{formatDate(grupo.fecha)}</p>
+                    <p className="text-xs text-gray-400">{grupo.cantidad_productos} producto{grupo.cantidad_productos !== 1 ? 's' : ''}</p>
+                  </div>
+                  <div className="col-span-3 text-center">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-400 font-black">Prom. aumento</p>
+                    <p className="text-lg font-black text-emerald-600">
+                      {grupo.variacion_promedio_aumentos > 0 ? '+' : ''}{grupo.variacion_promedio_aumentos.toFixed(2)}%
+                    </p>
+                  </div>
+                  <div className="col-span-4 text-right">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-400 font-black">Rango</p>
+                    <p className="text-sm font-bold text-gray-700">
+                      {grupo.variacion_min > 0 ? '+' : ''}{grupo.variacion_min.toFixed(1)}% … {grupo.variacion_max > 0 ? '+' : ''}{grupo.variacion_max.toFixed(1)}%
+                    </p>
+                  </div>
+                </button>
+
+                {expandedFecha === grupo.fecha && (
+                  <div className="bg-gray-50/60 px-8 py-4">
+                    <div className="rounded-2xl border border-gray-100 overflow-hidden bg-white overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-gray-50/50 text-[10px] font-black uppercase tracking-widest text-gray-400 border-b border-gray-100">
+                            <th className="px-6 py-3 text-left">Producto</th>
+                            <th className="px-6 py-3 text-right">PVP Anterior</th>
+                            <th className="px-6 py-3 text-right">Nuevo PVP</th>
+                            <th className="px-6 py-3 text-right">Variación</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {grupo.productos.map((p) => (
+                            <tr key={p.producto_id} className="hover:bg-emerald-50/20 transition-colors">
+                              <td className="px-6 py-3">
+                                <p className="font-medium text-gray-800">{p.producto_nombre}</p>
+                                <p className="text-[10px] text-gray-400 font-mono">{p.producto_codigo}</p>
+                              </td>
+                              <td className="px-6 py-3 text-right text-gray-500">{formatCurrency(p.pvp_anterior)}</td>
+                              <td className="px-6 py-3 text-right font-bold text-gray-900">{formatCurrency(p.pvp_nuevo)}</td>
+                              <td className="px-6 py-3 text-right">
+                                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-xs ${getVariationColor(p.variacion_porcentaje)}`}>
+                                  {getVariationIcon(p.variacion_porcentaje)}
+                                  {p.variacion_porcentaje > 0 ? '+' : ''}{p.variacion_porcentaje.toFixed(2)}%
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Results Section */}

@@ -26,7 +26,8 @@ export default function ProveedorModal({ open, editingProveedor, onClose, onSave
     contacto_telefono: '',
     contacto_email: '',
     descuento: 0,
-    cashback: 0,
+    cashback_parcial: 0,
+    cashback_total: 0,
     activo: true,
   })
 
@@ -43,7 +44,8 @@ export default function ProveedorModal({ open, editingProveedor, onClose, onSave
         contacto_telefono: editingProveedor.contacto_telefono || '',
         contacto_email: editingProveedor.contacto_email || '',
         descuento: Number(editingProveedor.descuento) || 0,
-        cashback: Number(editingProveedor.cashback) || 0,
+        cashback_parcial: Number(editingProveedor.cashback_parcial) || 0,
+        cashback_total: Number(editingProveedor.cashback_total) || 0,
         activo: editingProveedor.activo,
       })
     } else {
@@ -58,7 +60,8 @@ export default function ProveedorModal({ open, editingProveedor, onClose, onSave
         contacto_telefono: '',
         contacto_email: '',
         descuento: 0,
-        cashback: 0,
+        cashback_parcial: 0,
+        cashback_total: 0,
         activo: true,
       })
     }
@@ -238,14 +241,26 @@ export default function ProveedorModal({ open, editingProveedor, onClose, onSave
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Cashback (%)</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Cashback pago parcial (%)</label>
                 <input
                   type="number"
                   step="0.01"
                   min={0}
                   max={100}
-                  value={formData.cashback}
-                  onChange={(e) => setFormData({ ...formData, cashback: parseFloat(e.target.value) || 0 })}
+                  value={formData.cashback_parcial}
+                  onChange={(e) => setFormData({ ...formData, cashback_parcial: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Cashback pago total (%)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  max={100}
+                  value={formData.cashback_total}
+                  onChange={(e) => setFormData({ ...formData, cashback_total: parseFloat(e.target.value) || 0 })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>

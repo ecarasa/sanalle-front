@@ -41,12 +41,15 @@ export interface Proveedor {
   contacto_email: string | null;
   descuento: number;
   cashback: number;
+  cashback_parcial: number;
+  cashback_total: number;
   created_at: string;
   updated_at: string;
   saldo_pendiente_total?: number;
   pagos_pendientes?: PagoPendienteInfo[];
   notas?: NotaProveedorInfo[];
   total_notas_credito?: number;
+  cashback_pendiente?: number;
 }
 
 export interface PagoDeudaProveedorResponse {
@@ -54,8 +57,7 @@ export interface PagoDeudaProveedorResponse {
   movimiento_id: number;
   ingresos_saldados: number[];
   descuento_aplicado: number;
-  nota_credito_id: number | null;
-  cashback_importe: number;
+  cashback_acumulado?: number;
 }
 
 export interface Banco {
@@ -93,7 +95,7 @@ export interface User {
   email: string;
   username: string;
   nombre_completo: string;
-  rol: 'super_admin' | 'admin' | 'ventas' | 'repartidor';
+  rol: 'super_admin' | 'admin' | 'ventas' | 'repartidor' | 'operaciones';
   activo: boolean;
   debe_cambiar_contrasena: boolean;
   created_at: string;
@@ -108,6 +110,8 @@ export interface Cliente {
   cuit: string | null;
   domicilio: string;
   localidad_nombre: string | null;
+  localidad_provincia?: string | null;
+  localidad_codigo_postal?: string | null;
   telefono: string | null;
   whatsapp: string | null;
   email: string | null;
@@ -117,6 +121,7 @@ export interface Cliente {
   zona_nombre?: string;
   condicion_pago: string;
   plazo_dias: number | null;
+  dias_entrega: number | null;
   vendedor_id: number | null;
   activo: boolean;
   localidad_id: number | null;
@@ -137,6 +142,9 @@ export interface ClienteConDeuda extends Cliente {
   vendedor_nombre: string | null;
   semaforo: string | null;
   dias_mora: number | null;
+  ultima_compra: string | null;
+  dias_ultima_compra: number | null;
+  semaforo_actividad: string | null;
 }
 
 
@@ -167,6 +175,10 @@ export interface Producto {
   categoria_producto: string | null;
   presentacion: string | null;
   status: string | null;
+  // Formato de venta habilitado
+  vende_caja: boolean;
+  vende_blister: boolean;
+  vende_comprimido: boolean;
   pvp: number | null;
   fecha_act_pvp: string | null;
   margen_minorista: number | null;
@@ -194,6 +206,11 @@ export interface PedidoItem {
   id?: number;
   producto_id: number;
   cantidad: number;
+  cantidad_cajas?: number;
+  cantidad_blisters?: number;
+  unidad_venta?: 'caja' | 'blister';
+  blisters_por_caja?: number | null;
+  presentacion?: string | null;
   precio_lista?: number | null;
   descuento_porcentaje?: number | null;
   precio_unitario: number;
@@ -264,6 +281,8 @@ export interface Pedido {
   cliente_domicilio?: string | null;
   cliente_telefono?: string | null;
   cliente_localidad?: string | null;
+  cliente_codigo_postal?: string | null;
+  cliente_provincia?: string | null;
   cliente_zona?: string | null;
   repartidor_id: number | null;
   repartidor_nombre: string | null;
@@ -329,6 +348,7 @@ export interface Pago {
   transferencia_cuenta_origen: string | null;
   grupo_recibo_id: string | null;
   tipo_cuenta: 'remito' | 'factura';
+  es_puente?: boolean;
   created_at: string;
   updated_at: string;
   imputaciones: PagoImputacion[];
@@ -379,6 +399,15 @@ export interface IngresoImputacion {
   referencia_pago: string | null;
 }
 
+export interface IngresoImpuesto {
+  id: number;
+  tipo_iva_id: number | null;
+  concepto: string;
+  base: number;
+  tasa: number;
+  importe: number;
+}
+
 export interface IngresoMercaderia {
   id: number;
   numero: string;
@@ -391,7 +420,9 @@ export interface IngresoMercaderia {
   creado_por_id: number;
   creado_por_nombre: string | null;
   items: IngresoMercaderiaItem[];
+  impuestos: IngresoImpuesto[];
   imputaciones: IngresoImputacion[];
+  subtotal_neto: number;
   importe_total: number;
   saldo_pendiente: number;
   fecha_vencimiento: string | null;
@@ -450,6 +481,11 @@ export interface Token {
 }
 
 export interface DashboardVentas {
+  // Tarjetas del período elegido
+  total_pedidos: number;
+  importe_vendido: number;
+  importe_cobrado: number;
+  // Métricas históricas / secundarias
   total_vendido: number;
   pedidos_mes: number;
   pedidos_cancelados: number;
@@ -479,6 +515,13 @@ export interface PagosPorPedidoRow {
 
 export interface DashboardAdmin {
   mes: string;
+  // Tarjetas del período elegido (ventas + compras)
+  importe_vendido: number;
+  importe_cobrado: number;
+  total_pedidos: number;
+  importe_comprado: number;
+  importe_pagado: number;
+  // Métricas históricas / secundarias
   stock_total: number;
   ventas_totales: number;
   pedidos_totales: number;

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
-import { Package, ShoppingBag, Search, Inbox, FlaskConical } from 'lucide-react'
+import { Package, ShoppingBag, Search, Inbox, FlaskConical, Unlink } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
@@ -12,9 +12,13 @@ import { Grupo, GRUPO_LABEL, ListaDef, listasDe } from '@/lib/listas'
 const SIN_LABORATORIO = 'Sin laboratorio'
 const SIN_LABORATORIO_ID = '__sin__'
 const TODOS = ''
+const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'Vitalnova'
 
 interface Props {
-  grupo: Grupo
+  /** Modo interno: grupo fijo, pega al endpoint abierto /productos/public. */
+  grupo?: Grupo
+  /** Modo público con token revocable: pega a /publico/lista/{token} y deriva el grupo. */
+  token?: string
 }
 
 function DisponibleBadge({ stock }: { stock: number }) {
@@ -121,38 +125,74 @@ function labNombreDe(producto: ProductoPublico): string {
   return producto.laboratorio_nombre || SIN_LABORATORIO
 }
 
-export default function CatalogoView({ grupo }: Props) {
+export default function CatalogoView({ grupo, token }: Props) {
   const [search, setSearch] = useState('')
   const [laboratorioId, setLaboratorioId] = useState<string>(TODOS)
   const [data, setData] = useState<ProductoPublico[]>([])
   const [loading, setLoading] = useState(true)
+  // En modo token el grupo se resuelve desde la respuesta del backend.
+  const [grupoResuelto, setGrupoResuelto] = useState<Grupo | null>(grupo ?? null)
+  const [linkInvalido, setLinkInvalido] = useState(false)
 
   const debouncedSearch = useDebounce(search, 400)
 
-  const listas: ListaDef[] = useMemo(() => listasDe(grupo), [grupo])
-  const esComercio = grupo === 'comercio'
-  const modeLabel = `Lista de Precios ${GRUPO_LABEL[grupo]}`
+  const listas: ListaDef[] = useMemo(() => (grupoResuelto ? listasDe(grupoResuelto) : []), [grupoResuelto])
+  const esComercio = grupoResuelto === 'comercio'
+  const modeLabel = grupoResuelto ? `Lista de Precios ${GRUPO_LABEL[grupoResuelto]}` : 'Lista de Precios'
   const totalColumnas = 4 + listas.length
 
   const fetchProductos = useCallback(async () => {
     setLoading(true)
     try {
-      const params: Record<string, string | number | boolean> = {
-        search: debouncedSearch,
-        all: true,
-        lista: grupo,
+      if (token) {
+        // Modo público con token revocable.
+        const res = await api.get<PaginatedResponse<ProductoPublico> & { grupo: Grupo }>(
+          `/publico/lista/${encodeURIComponent(token)}`,
+          { params: { search: debouncedSearch, all: true } }
+        )
+        setData(res.data.items)
+        if (res.data.grupo) setGrupoResuelto(res.data.grupo)
+        setLinkInvalido(false)
+      } else {
+        const params: Record<string, string | number | boolean> = {
+          search: debouncedSearch,
+          all: true,
+          lista: grupo as Grupo,
+        }
+        const res = await api.get<PaginatedResponse<ProductoPublico>>('/productos/public', { params })
+        setData(res.data.items)
       }
-      const res = await api.get<PaginatedResponse<ProductoPublico>>('/productos/public', { params })
-      setData(res.data.items)
-    } catch (error) {
-      console.error(error)
-      toast.error('Error al cargar el catálogo')
+    } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } })?.response?.status
+      if (token && status === 404) {
+        setLinkInvalido(true)
+      } else {
+        console.error(error)
+        toast.error('Error al cargar el catálogo')
+      }
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, grupo])
+  }, [debouncedSearch, grupo, token])
 
   useEffect(() => { fetchProductos() }, [fetchProductos])
+
+  // Link público revocado o inexistente.
+  if (linkInvalido) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-gray-100 p-8 text-center">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-red-50 flex items-center justify-center">
+            <Unlink className="w-7 h-7 text-red-500" />
+          </div>
+          <h1 className="mt-4 text-xl font-bold text-gray-900">Lista no disponible</h1>
+          <p className="mt-2 text-sm text-gray-500">
+            Este link de lista de precios no es válido o fue revocado. Pedí un link actualizado a Droguería SANALLE.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   // Opciones del select: SIEMPRE derivadas del dataset COMPLETO (sin aplicar el filtro
   // de laboratorio), si no el select se quedaría con una sola opción al filtrar.
@@ -217,7 +257,7 @@ export default function CatalogoView({ grupo }: Props) {
               </div>
               <div>
                 <h1 className="text-xl sm:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-blue-600">
-                  SANALLE
+                  {APP_NAME}
                 </h1>
                 <p className="text-[10px] sm:text-xs text-gray-500 font-medium tracking-wider uppercase">
                   {modeLabel}
@@ -393,7 +433,7 @@ export default function CatalogoView({ grupo }: Props) {
 
         <footer className="mt-12 py-8 border-t border-gray-200 text-center">
           <p className="text-gray-500 text-sm">
-            &copy; {new Date().getFullYear()} SANALLE - Droguería y Distribuidora de Medicamentos. Todos los derechos reservados.
+            &copy; {new Date().getFullYear()} {APP_NAME} - Droguería y Distribuidora de Medicamentos. Todos los derechos reservados.
           </p>
         </footer>
       </main>

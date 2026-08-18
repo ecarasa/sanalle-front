@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Plus, Package, Eye } from 'lucide-react'
+import { Plus, Package, Eye, Trash2, AlertTriangle, Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
@@ -21,6 +21,10 @@ export default function IngresosMercaderiaPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [detalleIngreso, setDetalleIngreso] = useState<IngresoMercaderia | null>(null)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [confirmText, setConfirmText] = useState('')
+  const [revertirStock, setRevertirStock] = useState(true)
+  const [deleting, setDeleting] = useState(false)
 
   const fetchIngresos = useCallback(async () => {
     setLoading(true)
@@ -40,6 +44,31 @@ export default function IngresosMercaderiaPage() {
   useEffect(() => {
     fetchIngresos()
   }, [fetchIngresos])
+
+  const closeDeleteModal = useCallback(() => {
+    setShowDeleteModal(false)
+    setConfirmText('')
+    setRevertirStock(true)
+  }, [])
+
+  const handleDeleteAll = useCallback(async () => {
+    setDeleting(true)
+    try {
+      const res = await api.delete('/ingresos-mercaderia', {
+        params: { confirmar: 'ELIMINAR', revertir_stock: revertirStock },
+      })
+      toast.success(`${res.data.eliminados} compras eliminadas`)
+      setShowDeleteModal(false)
+      setConfirmText('')
+      setRevertirStock(true)
+      setPage(1)
+      fetchIngresos()
+    } catch {
+      toast.error('Error al eliminar las compras')
+    } finally {
+      setDeleting(false)
+    }
+  }, [revertirStock, fetchIngresos])
 
   const columns = useMemo(() => [
     {
@@ -167,14 +196,25 @@ export default function IngresosMercaderiaPage() {
             <p className="text-sm text-gray-500 mt-1">Registra compras de productos al stock</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => router.push('/dashboard/admin/ingresos-mercaderia/nuevo')}
-          className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-[#003087] rounded-lg hover:bg-[#002570] transition-colors shadow-sm self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          Nueva Compra
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setShowDeleteModal(true)}
+            disabled={total === 0}
+            className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-[#E31837] rounded-lg hover:bg-[#c01530] transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Trash2 className="w-4 h-4" />
+            Eliminar todas
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push('/dashboard/admin/ingresos-mercaderia/nuevo')}
+            className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-[#003087] rounded-lg hover:bg-[#002570] transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Nueva Compra
+          </button>
+        </div>
       </div>
 
       <DataGrid
@@ -200,6 +240,69 @@ export default function IngresosMercaderiaPage() {
           setData(prev => prev.map(i => i.id === updated.id ? updated : i))
         }}
       />
+
+      {/* Modal confirmación de borrado total */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={closeDeleteModal}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 rounded-xl bg-red-100">
+                <AlertTriangle className="w-6 h-6 text-[#E31837]" />
+              </div>
+              <h2 className="text-lg font-bold text-gray-900">Eliminar todas las compras</h2>
+            </div>
+            <p className="text-sm text-gray-600 mb-3">
+              Esta acción borra <strong>todos</strong> los registros de compra junto con sus items,
+              impuestos e imputaciones de pago. Se resta del <strong>saldo con cada proveedor</strong> el
+              importe que estas compras le sumaron. Es <strong>irreversible</strong>.
+            </p>
+            <label className="flex items-start gap-2 mb-4 p-3 rounded-lg bg-gray-50 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={revertirStock}
+                onChange={(e) => setRevertirStock(e.target.checked)}
+                className="mt-0.5 rounded text-[#E31837]"
+              />
+              <span className="text-sm text-gray-700">
+                Revertir el stock ingresado por estas compras
+                <span className="block text-xs text-gray-400">
+                  Descuenta del stock las cantidades que estas compras habían sumado.
+                </span>
+              </span>
+            </label>
+            <p className="text-sm text-gray-600 mb-2">
+              Para confirmar, escribí <span className="font-mono font-bold text-[#E31837]">ELIMINAR</span>:
+            </p>
+            <input
+              type="text"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="ELIMINAR"
+              autoFocus
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-[#E31837]/30 focus:border-[#E31837]"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={deleting}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteAll}
+                disabled={confirmText !== 'ELIMINAR' || deleting}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#E31837] rounded-lg hover:bg-[#c01530] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                Eliminar todo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

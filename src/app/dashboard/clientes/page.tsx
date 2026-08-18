@@ -20,10 +20,17 @@ export default function ClientesPage() {
     pageSize, setPageSize,
     data, total, loading,
     localidades,
+    zonas,
     fetchClientes,
     handleExport,
     handleColumnFilter,
+    handleSort,
   } = useClientesData()
+
+  const zonaOptions = useMemo(
+    () => zonas.map((z) => ({ label: z.nombre, value: z.nombre })),
+    [zonas],
+  )
 
   const columns = useMemo(() => [
     { key: 'id', label: 'ID', sortable: true },
@@ -64,7 +71,8 @@ export default function ClientesPage() {
       label: 'Zona',
       sortable: true,
       filterable: true,
-      filterType: 'text' as const,
+      filterType: 'select' as const,
+      filterOptions: zonaOptions,
       render: (value: string | null) => value || '-',
     },
     {
@@ -110,7 +118,26 @@ export default function ClientesPage() {
         return <span className={`inline-block w-4 h-4 rounded-full ${colors[value] || 'bg-gray-300'}`} title={tooltip} />
       },
     },
-    /* --- OCULTO (revivir): columnas Remitos / Facturas / Deuda. Ver docs/OCULTO_PARA_REVIVIR.md ---
+    {
+      key: 'semaforo_actividad',
+      label: 'Actividad',
+      sortable: false,
+      filterable: true,
+      filterType: 'select' as const,
+      filterOptions: [
+        { label: 'Verde (da continuidad)', value: 'verde' },
+        { label: 'Amarillo (compró hace poco)', value: 'amarillo' },
+        { label: 'Rojo (inactivo)', value: 'rojo' },
+      ],
+      render: (value: string | null, row: ClienteConDeuda) => {
+        const colors: Record<string, string> = { verde: 'bg-green-500', amarillo: 'bg-yellow-400', rojo: 'bg-red-500' }
+        if (!value) return <span className="text-gray-400 text-xs">-</span>
+        const tooltip = row.dias_ultima_compra !== null
+          ? `Última compra hace ${row.dias_ultima_compra} días`
+          : 'Sin compras registradas'
+        return <span className={`inline-block w-4 h-4 rounded-full ${colors[value] || 'bg-gray-300'}`} title={tooltip} />
+      },
+    },
     {
       key: 'saldo_remitos',
       label: 'Remitos por Cobrar',
@@ -141,7 +168,6 @@ export default function ClientesPage() {
         </span>
       ),
     },
-    --- FIN OCULTO --- */
     {
       key: 'acciones',
       label: 'Acciones',
@@ -179,7 +205,7 @@ export default function ClientesPage() {
         </div>
       ),
     },
-  ], [router])
+  ], [router, zonaOptions])
 
   return (
     <div className="space-y-6">
@@ -210,6 +236,7 @@ export default function ClientesPage() {
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
         onColumnFilter={handleColumnFilter}
+        onSort={handleSort}
         onExport={handleExport}
         searchPlaceholder="Buscar por nombre, CUIT, localidad..."
         storageKey="clientes-grid-columns"

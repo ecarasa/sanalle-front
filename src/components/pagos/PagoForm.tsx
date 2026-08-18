@@ -248,6 +248,9 @@ export default function PagoForm({ initialClienteId }: PagoFormProps) {
         observacion: observacion || null,
         referencia: referencia || null,
         auto_imputar: autoImputar,
+        // Si además paga a un proveedor, el cobro es un pasamanos (cuenta puente):
+        // la plata entra sólo para salir, no impacta la caja real.
+        es_puente: pagarProveedor,
       }
 
       if (tipoPago === 'cheque') {
@@ -609,8 +612,10 @@ export default function PagoForm({ initialClienteId }: PagoFormProps) {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900">Pagar a Proveedor</h2>
-                <p className="text-sm text-gray-500 mt-0.5">Cancelar comprobantes pendientes con un proveedor usando este cobro</p>
+                <h2 className="text-lg font-semibold text-gray-900">Pagar a Proveedor <span className="text-xs font-medium text-blue-600">(cuenta puente)</span></h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  Usar este cobro para pagar a un proveedor (pasamanos). La plata entra y sale: se registra como tránsito y no impacta la caja real.
+                </p>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input

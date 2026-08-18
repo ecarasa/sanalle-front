@@ -27,6 +27,7 @@ interface ClienteForm {
   zona_id: string
   condicion_pago: string
   plazo_dias: string
+  dias_entrega: string
   localidad_id: string
   vendedor_id: string
   comentarios: string
@@ -46,6 +47,7 @@ const emptyForm: ClienteForm = {
   zona_id: '',
   condicion_pago: '',
   plazo_dias: '',
+  dias_entrega: '',
   localidad_id: '',
   vendedor_id: '',
   comentarios: '',
@@ -108,6 +110,7 @@ export default function ClienteFormModal({
         zona_id: editingCliente.zona_id != null ? String(editingCliente.zona_id) : '',
         condicion_pago: editingCliente.condicion_pago || '',
         plazo_dias: editingCliente.plazo_dias != null ? String(editingCliente.plazo_dias) : '',
+        dias_entrega: editingCliente.dias_entrega != null ? String(editingCliente.dias_entrega) : '',
         localidad_id: editingCliente.localidad_id != null ? String(editingCliente.localidad_id) : '',
         vendedor_id: editingCliente.vendedor_id != null ? String(editingCliente.vendedor_id) : '',
         comentarios: editingCliente.comentarios || '',
@@ -140,6 +143,7 @@ export default function ClienteFormModal({
         zona_id: form.zona_id ? parseInt(form.zona_id) : null,
         condicion_pago: form.condicion_pago || null,
         plazo_dias: form.plazo_dias ? parseInt(form.plazo_dias) : null,
+        dias_entrega: form.dias_entrega ? parseInt(form.dias_entrega) : null,
         localidad_id: form.localidad_id ? parseInt(form.localidad_id) : null,
         vendedor_id: form.vendedor_id && isAdmin ? parseInt(form.vendedor_id) : null,
         comentarios: form.comentarios || null,
@@ -318,7 +322,7 @@ export default function ClienteFormModal({
               </div>
               {form.condicion_pago === 'plazo' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Plazo (días)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Plazo de pago (días)</label>
                   <input
                     type="number"
                     min="1"
@@ -329,6 +333,18 @@ export default function ClienteFormModal({
                   />
                 </div>
               )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Días de entrega</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.dias_entrega}
+                  onChange={(e) => setForm({ ...form, dias_entrega: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
+                  placeholder="Ej: 1"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">Días hasta la entrega por defecto al crear un pedido.</p>
+              </div>
             </div>
 
 

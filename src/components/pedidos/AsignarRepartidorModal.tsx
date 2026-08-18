@@ -40,8 +40,8 @@ export default function AsignarRepartidorModal({
         page_size: 50,
       }
       const res = await api.get('/users', { params })
-      // Filtramos para solo mostrar usuarios activos
-      setUsers(res.data.items.filter((u: UserType) => u.activo))
+      // Solo repartidores activos (antes listaba cualquier usuario).
+      setUsers(res.data.items.filter((u: UserType) => u.activo && u.rol === 'repartidor'))
     } catch {
       toast.error('Error al cargar usuarios')
     } finally {

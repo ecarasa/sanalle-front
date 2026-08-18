@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/useAuth'
-import TopNav from '@/components/layout/TopNav'
+import Sidebar from '@/components/layout/Sidebar'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { FeatureFlagsProvider, useFeatureFlags } from '@/hooks/useFeatureFlags'
@@ -95,15 +95,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <FeatureFlagsProvider>
-    <div className="flex flex-col min-h-screen bg-surface">
-      <TopNav
+    <div className="min-h-screen bg-surface">
+      <Sidebar
         user={{ nombre_completo: user.nombre_completo, rol: user.rol }}
         onLogout={logout}
         onChangePassword={() => setShowPasswordModal(true)}
       />
 
-      <main className="flex-1 p-3 sm:p-6">
-        <FeatureGuard rol={user.rol}>{children}</FeatureGuard>
+      <main className="lg:pl-64 pt-14 lg:pt-0">
+        <div className="p-3 sm:p-6">
+          <FeatureGuard rol={user.rol}>{children}</FeatureGuard>
+        </div>
       </main>
 
       {/* Password Change Modal */}

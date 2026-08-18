@@ -65,7 +65,12 @@ export default function ClientSelector({ selectedClienteId, onClientSelect, disa
   const filteredClientes = useMemo(() => {
     if (!debouncedClientSearch) return clientes
     const lower = debouncedClientSearch.toLowerCase()
-    return clientes.filter((c) => c.nombre.toLowerCase().includes(lower))
+    // Busca por nombre, CUIT y razón social (antes solo nombre).
+    return clientes.filter((c) =>
+      c.nombre.toLowerCase().includes(lower)
+      || (c.cuit ?? '').toLowerCase().includes(lower)
+      || (c.razon_social ?? '').toLowerCase().includes(lower)
+    )
   }, [clientes, debouncedClientSearch])
 
   return (
@@ -142,20 +147,24 @@ export default function ClientSelector({ selectedClienteId, onClientSelect, disa
           ) : filteredClientes.length === 0 ? (
             <div className="px-5 py-4 text-sm text-gray-500 text-center">No se encontraron clientes</div>
           ) : (
-            filteredClientes.map(c => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => {
-                  onClientSelect(c.id, c)
-                  setClientSearch(c.nombre)
-                  setShowClientDropdown(false)
-                }}
-                className={`w-full text-left px-5 py-3.5 text-sm transition-colors border-l-2 ${selectedClienteId === c.id ? 'bg-blue-50/50 border-l-[#003087] font-medium text-[#003087]' : 'border-l-transparent hover:bg-gray-50 text-gray-700'}`}
-              >
-                {c.nombre}
-              </button>
-            ))
+            filteredClientes.map(c => {
+              const secundario = [c.cuit, c.razon_social].filter(Boolean).join(' · ')
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => {
+                    onClientSelect(c.id, c)
+                    setClientSearch(c.nombre)
+                    setShowClientDropdown(false)
+                  }}
+                  className={`w-full text-left px-5 py-3 text-sm transition-colors border-l-2 ${selectedClienteId === c.id ? 'bg-blue-50/50 border-l-[#003087] text-[#003087]' : 'border-l-transparent hover:bg-gray-50 text-gray-700'}`}
+                >
+                  <span className={`block ${selectedClienteId === c.id ? 'font-semibold' : 'font-medium'}`}>{c.nombre}</span>
+                  {secundario && <span className="block text-xs text-gray-400 mt-0.5">{secundario}</span>}
+                </button>
+              )
+            })
           )}
         </div>
       )}

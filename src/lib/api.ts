@@ -30,7 +30,7 @@ api.interceptors.response.use(
     const originalRequest = error.config
     if (error.response?.status === 401 && !originalRequest._retry) {
       // Don't redirect if we are on a public page
-      const publicPaths = ['/catalogo', '/login']
+      const publicPaths = ['/catalogo', '/lista', '/login']
       const currentPath = typeof window !== 'undefined' ? window.location.pathname : ''
       
       if (publicPaths.some(path => currentPath.startsWith(path))) {

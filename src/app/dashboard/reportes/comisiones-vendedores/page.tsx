@@ -68,28 +68,42 @@ function MetricCard({ title, value, icon: Icon, color, subValue }: { title: stri
   )
 }
 
+interface VendedorOption {
+  id: number
+  nombre_completo: string | null
+  username: string
+}
+
 export default function ComisionesVendedoresPage() {
   const [fechaDesde, setFechaDesde] = useState(defaultDesde())
   const [fechaHasta, setFechaHasta] = useState(toInputDate(new Date()))
+  const [vendedorId, setVendedorId] = useState<string>('')
+  const [vendedores, setVendedores] = useState<VendedorOption[]>([])
   const [data, setData] = useState<VendedorComisionRow[]>([])
   const [loading, setLoading] = useState(false)
   const [expandedRow, setExpandedRow] = useState<number | null>(null)
   const [expandedPedido, setExpandedPedido] = useState<number | null>(null)
 
+  useEffect(() => {
+    api.get<VendedorOption[]>('/users/vendedores')
+      .then(res => setVendedores(res.data))
+      .catch(() => {})
+  }, [])
+
   const fetchData = useCallback(async () => {
     if (!fechaDesde || !fechaHasta) return
     setLoading(true)
     try {
-      const res = await api.get<VendedorComisionRow[]>('/reportes/comisiones-vendedores', {
-        params: { fecha_desde: fechaDesde, fecha_hasta: fechaHasta },
-      })
+      const params: Record<string, string> = { fecha_desde: fechaDesde, fecha_hasta: fechaHasta }
+      if (vendedorId) params.vendedor_id = vendedorId
+      const res = await api.get<VendedorComisionRow[]>('/reportes/comisiones-vendedores', { params })
       setData(res.data)
     } catch {
       setData([])
     } finally {
       setLoading(false)
     }
-  }, [fechaDesde, fechaHasta])
+  }, [fechaDesde, fechaHasta, vendedorId])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -179,7 +193,25 @@ export default function ComisionesVendedoresPage() {
         </div>
 
         {/* Filter Bar - Glassmorphism */}
-        <div className="bg-white/60 backdrop-blur-md rounded-2xl shadow-sm border border-white/40 p-2 flex items-center gap-2">
+        <div className="bg-white/60 backdrop-blur-md rounded-2xl shadow-sm border border-white/40 p-2 flex items-center gap-2 flex-wrap">
+          {vendedores.length > 1 && (
+            <>
+              <div className="flex items-center gap-1 px-3 py-2">
+                <Users className="w-4 h-4 text-gray-400" />
+                <select
+                  value={vendedorId}
+                  onChange={e => setVendedorId(e.target.value)}
+                  className="bg-transparent border-none text-sm font-semibold text-gray-700 focus:ring-0 p-0 pr-6 cursor-pointer"
+                >
+                  <option value="">Todos los vendedores</option>
+                  {vendedores.map(v => (
+                    <option key={v.id} value={v.id}>{v.nombre_completo || v.username}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="h-4 w-px bg-gray-200" />
+            </>
+          )}
           <div className="flex items-center gap-1 px-3 py-2">
             <Calendar className="w-4 h-4 text-gray-400" />
             <input

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import Link from 'next/link'
-import { Search, FileText, X, Loader2, ChevronDown, ExternalLink, Info, CheckCircle, Edit, Plus } from 'lucide-react'
+import { Search, FileText, X, Loader2, ChevronDown, ExternalLink, Info, CheckCircle, Edit, Plus, CreditCard } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -14,6 +14,8 @@ import ImputarPagoModal from '@/components/dashboard/pagos/ImputarPagoModal'
 import ModificarPagoModal from '@/components/dashboard/pagos/ModificarPagoModal'
 import DetallePagoDrawer from '@/components/dashboard/pagos/DetallePagoDrawer'
 import ClientSelector from '@/components/ui/ClientSelector'
+import PeriodoSelect from '@/components/ui/PeriodoSelect'
+import { rangoDePeriodo } from '@/lib/periodos'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 
 const TIPO_PAGO_BADGE: Record<string, string> = {
@@ -96,6 +98,7 @@ export default function PagosPage() {
   const [sortBy, setSortBy] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({})
+  const [periodo, setPeriodo] = useState('mes')
   const [showClientPanel, setShowClientPanel] = useState(false)
   const [imputarPago, setImputarPago] = useState<Pago | null>(null)
 
@@ -119,6 +122,9 @@ export default function PagosPage() {
       if (selectedClienteId) {
         params.cliente_id = selectedClienteId
       }
+      const { desde, hasta } = rangoDePeriodo(periodo)
+      if (desde) params.fecha_desde = desde
+      if (hasta) params.fecha_hasta = hasta
       if (Object.keys(columnFilters).length > 0) {
         params.filters = JSON.stringify(columnFilters)
       }
@@ -130,16 +136,16 @@ export default function PagosPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, selectedClienteId, columnFilters, sortBy, sortDir])
+  }, [page, pageSize, selectedClienteId, columnFilters, sortBy, sortDir, periodo])
 
   useEffect(() => {
     fetchPagos()
   }, [fetchPagos])
 
-  // Reset page when client selection changes
+  // Reset page when client selection or period changes
   useEffect(() => {
     setPage(1)
-  }, [selectedClienteId])
+  }, [selectedClienteId, periodo])
 
 
 
@@ -307,6 +313,7 @@ export default function PagosPage() {
       sortable: false,
       filterable: true,
       filterType: 'text' as const,
+      defaultVisible: false,
       render: (value: string | null) => value || '-',
     },
     {
@@ -315,6 +322,7 @@ export default function PagosPage() {
       sortable: false,
       filterable: true,
       filterType: 'text' as const,
+      defaultVisible: false,
       render: (value: string | null) => value || '-',
     },
     {
@@ -323,6 +331,7 @@ export default function PagosPage() {
       sortable: false,
       filterable: true,
       filterType: 'text' as const,
+      defaultVisible: false,
       render: (value: string | null) => (value ? formatDate(value) : '-'),
     },
     {
@@ -331,6 +340,7 @@ export default function PagosPage() {
       sortable: false,
       filterable: true,
       filterType: 'text' as const,
+      defaultVisible: false,
       render: (value: string | null) => (value ? formatDate(value) : '-'),
     },
     ...(isAdmin ? [{
@@ -393,16 +403,17 @@ export default function PagosPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Pagos</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Gesti&oacute;n de pagos y cobranzas
-          </p>
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-[#003087] rounded-lg shrink-0">
+          <CreditCard className="w-6 h-6 text-white" />
+        </div>
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 leading-tight">Pagos</h1>
+          <p className="text-sm text-gray-500">Gesti&oacute;n de pagos y cobranzas</p>
         </div>
         <Link
           href="/dashboard/pagos/nuevo"
-          className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#003087] rounded-lg hover:bg-[#002570] transition-colors"
+          className="ml-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-[#003087] rounded-lg hover:bg-[#002570] transition-colors shadow-sm shrink-0"
         >
           <Plus className="w-4 h-4" />
           <span className="hidden sm:inline">Nuevo Pago</span>
@@ -414,10 +425,25 @@ export default function PagosPage() {
         {/* Main panel - Pagos */}
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex flex-col gap-4 p-4 sm:p-5 border-b border-gray-100 bg-gray-50/30">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg sm:text-xl font-bold text-gray-900">
-                {selectedCliente ? selectedCliente.nombre : 'Todos los pagos'}
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-lg sm:text-xl font-bold text-gray-900 flex items-center gap-2 min-w-0">
+                <span className="truncate">{selectedCliente ? selectedCliente.nombre : 'Todos los pagos'}</span>
+                {!loading && (
+                  <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold text-[#003087] bg-[#003087]/10">
+                    {total} {total === 1 ? 'pago' : 'pagos'}
+                  </span>
+                )}
               </h2>
+              {selectedCliente && (
+                <button
+                  type="button"
+                  onClick={() => { setSelectedClienteId(null); setSelectedCliente(null) }}
+                  className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  Ver todos
+                </button>
+              )}
             </div>
 
             {/* Protagonist Client Search */}
@@ -428,6 +454,12 @@ export default function PagosPage() {
                 setSelectedCliente(cliente || null)
               }}
             />
+
+            {/* Filtro por período */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Período</span>
+              <PeriodoSelect value={periodo} onChange={setPeriodo} />
+            </div>
           </div>
           <div className="flex-1 overflow-auto">
             {authLoading ? (
@@ -447,7 +479,7 @@ export default function PagosPage() {
                 onSort={(key, dir) => { setSortBy(key); setSortDir(dir); setPage(1) }}
                 onExport={handleExport}
                 onColumnFilter={(filters) => { setColumnFilters(filters); setPage(1) }}
-                storageKey="pagos-grid-columns"
+                storageKey="pagos-grid-columns-v2"
               />
             )}
           </div>

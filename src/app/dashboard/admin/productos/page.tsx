@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Plus, Pencil, Trash2, X, Loader2, ArrowUpDown, Upload, CheckCircle2, AlertTriangle, DollarSign, Download, FileSpreadsheet, Webcam, History, RefreshCw } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Plus, Pencil, Trash2, X, Loader2, ArrowUpDown, Upload, CheckCircle2, AlertTriangle, DollarSign, Download, FileSpreadsheet, Webcam, History, RefreshCw, Sparkles, Tag as TagIcon, Link2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
@@ -12,7 +12,9 @@ import DataGrid from '@/components/grilla/DataGrid'
 import ProductoModal from '@/components/admin/ProductoModal'
 import ProductoHistorialModal from '@/components/admin/ProductoHistorialModal'
 import ScraperLogsModal from '@/components/admin/ScraperLogsModal'
+import ListasPublicasModal from '@/components/admin/ListasPublicasModal'
 import { listasDe, MargenField } from '@/lib/listas'
+import { filtrarProductos, ordenarProductos } from '@/lib/productosFiltro'
 import { Producto, PaginatedResponse, Proveedor, Laboratorio } from '@/types'
 
 const LISTAS_COMERCIO = listasDe('comercio')
@@ -77,15 +79,27 @@ export default function AdminProductosPage() {
   const stockOps: Array<'transfer' | 'fraction' | 'manual'> = canManualAdjust
     ? ['transfer', 'fraction', 'manual']
     : ['transfer', 'fraction']
-  const [search, setSearch] = useState('')
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(25)
-  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({})
-  const [data, setData] = useState<Producto[]>([])
-  const [total, setTotal] = useState(0)
+  // Estado inicial restaurado de la sesión, para volver donde estabas al navegar.
+  const savedState = useMemo(() => {
+    if (typeof window === 'undefined') return {} as Record<string, unknown>
+    try { return JSON.parse(sessionStorage.getItem('admin-productos-state') || '{}') } catch { return {} }
+  }, [])
+  const [search, setSearch] = useState<string>((savedState.search as string) ?? '')
+  const [page, setPage] = useState<number>((savedState.page as number) ?? 1)
+  const [pageSize, setPageSize] = useState<number>((savedState.pageSize as number) ?? 25)
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>((savedState.columnFilters as Record<string, string>) ?? {})
+  const [sortBy, setSortBy] = useState<string>((savedState.sortBy as string) ?? 'nombre')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>((savedState.sortDir as 'asc' | 'desc') ?? 'asc')
+  // Grilla en memoria: se carga TODO el catálogo una sola vez y el filtrado,
+  // orden y paginado se hacen client-side (sin pegarle a la API por cada filtro).
+  const [allProductos, setAllProductos] = useState<Producto[]>([])
   const [loading, setLoading] = useState(true)
-  const [proveedorId, setProveedorId] = useState<string>('')
-  const [laboratorioId, setLaboratorioId] = useState<string>('')
+  // Días para considerar un producto "nuevo" (configurable en Configuración general).
+  const [productoNuevoDias, setProductoNuevoDias] = useState(30)
+  const [proveedorId, setProveedorId] = useState<string>((savedState.proveedorId as string) ?? '')
+  const [laboratorioId, setLaboratorioId] = useState<string>((savedState.laboratorioId as string) ?? '')
+  const [soloNuevos, setSoloNuevos] = useState(false)
+  const [sinPvp, setSinPvp] = useState(false)
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editingProducto, setEditingProducto] = useState<Producto | null>(null)
@@ -102,6 +116,7 @@ export default function AdminProductosPage() {
   const [historialProducto, setHistorialProducto] = useState<Producto | null>(null)
   const [scrapeLoading, setScrapeLoading] = useState(false)
   const [scraperLogsOpen, setScraperLogsOpen] = useState(false)
+  const [listasPublicasOpen, setListasPublicasOpen] = useState(false)
 
   const [stockModal, setStockModal] = useState<Producto | null>(null)
   const [stockAdjustOp, setStockAdjustOp] = useState<'transfer' | 'fraction' | 'manual'>('transfer')
@@ -142,6 +157,16 @@ export default function AdminProductosPage() {
     }).catch(() => {})
   }, [])
 
+  // Configuración general: cuántos días cuenta como "producto nuevo".
+  useEffect(() => {
+    api.get<{ producto_nuevo_dias?: string }>('/configuracion')
+      .then((r) => {
+        const d = parseInt(r.data?.producto_nuevo_dias ?? '30', 10)
+        if (!isNaN(d) && d > 0) setProductoNuevoDias(d)
+      })
+      .catch(() => {})
+  }, [])
+
   // Fetch master data for dropdowns.
   // La DB remota puede tardar varios segundos: cada combo se carga de forma
   // independiente y con reintentos, así un fallo transitorio no lo deja vacío.
@@ -166,32 +191,100 @@ export default function AdminProductosPage() {
     return () => { cancelled = true }
   }, [])
 
-  const fetchProductos = useCallback(async () => {
+  // Carga única de TODO el catálogo (una sola llamada a la API).
+  const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const params: Record<string, string | number> = { search: debouncedSearch, page, page_size: pageSize }
-      if (proveedorId) params.proveedor_id = proveedorId
-      if (laboratorioId) params.laboratorio_id = laboratorioId
-      if (Object.keys(columnFilters).length > 0) {
-        params.filters = JSON.stringify(columnFilters)
-      }
-      const res = await api.get<PaginatedResponse<Producto>>('/productos', { params })
-      setData(res.data.items)
-      setTotal(res.data.total)
+      const res = await api.get<PaginatedResponse<Producto>>('/productos', { params: { all: true } })
+      setAllProductos(res.data.items)
     } catch {
       toast.error('Error al cargar productos')
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, page, pageSize, columnFilters, proveedorId, laboratorioId])
+  }, [])
 
   useEffect(() => {
-    fetchProductos()
-  }, [fetchProductos])
+    fetchAll()
+  }, [fetchAll])
 
-  useEffect(() => {
+  const handleSort = useCallback((key: string, direction: 'asc' | 'desc') => {
+    setSortBy(key)
+    setSortDir(direction)
     setPage(1)
-  }, [debouncedSearch, proveedorId, laboratorioId])
+  }, [])
+
+  // Actualización optimista: tras editar un producto existente, refresca solo esa
+  // fila en memoria (sin recargar todo). Alta/borrado -> recarga completa.
+  const handleProductoSaved = useCallback((producto?: Producto) => {
+    if (producto && allProductos.some((p) => p.id === producto.id)) {
+      setAllProductos((prev) => prev.map((p) => (p.id === producto.id ? { ...p, ...producto } : p)))
+    } else {
+      fetchAll()
+    }
+  }, [allProductos, fetchAll])
+
+  // --- Filtrado / orden / paginado 100% en memoria (lógica en @/lib/productosFiltro) ---
+  const filtered = useMemo(
+    () => filtrarProductos(allProductos, {
+      search: debouncedSearch,
+      proveedorId,
+      laboratorioId,
+      soloNuevos,
+      sinPvp,
+      productoNuevoDias,
+      columnFilters,
+    }),
+    [allProductos, debouncedSearch, proveedorId, laboratorioId, soloNuevos, sinPvp, columnFilters, productoNuevoDias]
+  )
+
+  const sorted = useMemo(
+    () => ordenarProductos(filtered, sortBy, sortDir),
+    [filtered, sortBy, sortDir]
+  )
+
+  const filteredTotal = sorted.length
+  const pagedData = useMemo(
+    () => sorted.slice((page - 1) * pageSize, page * pageSize),
+    [sorted, page, pageSize]
+  )
+
+  // Opciones de los combos derivadas del catálogo en memoria (siempre coinciden
+  // con lo que hay cargado; no dependen de otra llamada a la API).
+  const proveedorOpciones = useMemo(() => {
+    const m = new Map<number, string>()
+    for (const p of allProductos) if (p.proveedor_id != null) m.set(p.proveedor_id, p.proveedor_nombre || `#${p.proveedor_id}`)
+    return Array.from(m, ([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre))
+  }, [allProductos])
+  const laboratorioOpciones = useMemo(() => {
+    const m = new Map<number, string>()
+    for (const p of allProductos) if (p.laboratorio_id != null) m.set(p.laboratorio_id, p.laboratorio_nombre || `#${p.laboratorio_id}`)
+    return Array.from(m, ([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre))
+  }, [allProductos])
+
+  // Si el filtrado deja la página fuera de rango, volver a una válida.
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(filteredTotal / pageSize))
+    if (page > maxPage) setPage(maxPage)
+  }, [filteredTotal, pageSize, page])
+
+  // Persistir el estado de navegación para volver donde estabas.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const state = { search, page, pageSize, columnFilters, sortBy, sortDir, proveedorId, laboratorioId }
+    try { sessionStorage.setItem('admin-productos-state', JSON.stringify(state)) } catch { /* noop */ }
+  }, [search, page, pageSize, columnFilters, sortBy, sortDir, proveedorId, laboratorioId])
+
+  // Al cambiar filtros se vuelve a la página 1, pero NO en el primer render
+  // (así se respeta la página restaurada de la sesión).
+  const firstResetRef = useRef(true)
+  useEffect(() => {
+    if (firstResetRef.current) {
+      firstResetRef.current = false
+      return
+    }
+    setPage(1)
+  }, [debouncedSearch, proveedorId, laboratorioId, soloNuevos, sinPvp])
 
   const openCreate = () => {
     setEditingProducto(null)
@@ -215,7 +308,7 @@ export default function AdminProductosPage() {
       await api.delete(`/productos/${deleteConfirm.id}`)
       toast.success('Producto eliminado correctamente')
       setDeleteConfirm(null)
-      fetchProductos()
+      fetchAll()
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } }
       toast.error(error.response?.data?.detail || 'Error al eliminar producto')
@@ -254,7 +347,7 @@ export default function AdminProductosPage() {
       await api.post(`/productos/${stockModal.id}/operacion-stock`, payload)
       toast.success('Operación registrada correctamente')
       setStockModal(null)
-      fetchProductos()
+      fetchAll()
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } }
       toast.error(error.response?.data?.detail || 'Error en la operación')
@@ -296,7 +389,7 @@ export default function AdminProductosPage() {
       })
       setImportResult(res.data)
       toast.success(`Importacion completada: ${res.data.created} creados, ${res.data.updated} actualizados`)
-      fetchProductos()
+      fetchAll()
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: unknown } } }
       const detail = error.response?.data?.detail
@@ -329,7 +422,7 @@ export default function AdminProductosPage() {
       setBulkPriceCampo('pvp')
       setBulkPriceFiltro('todos')
       setBulkPriceFiltroId('')
-      fetchProductos()
+      fetchAll()
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } }
       toast.error(error.response?.data?.detail || 'Error al actualizar precios')
@@ -345,7 +438,7 @@ export default function AdminProductosPage() {
       const res = await api.post('/scraper/trigger-pvp-scrape')
       setScrapeResult(res.data)
       toast.success('Actualización de precios completada')
-      fetchProductos()
+      fetchAll()
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } }
       toast.error(error.response?.data?.detail || 'Error al iniciar el scrape')
@@ -366,7 +459,7 @@ export default function AdminProductosPage() {
       })
       setExcelResult(res.data)
       toast.success(`${res.data.updated} precios actualizados`)
-      fetchProductos()
+      fetchAll()
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } }
       toast.error(error.response?.data?.detail || 'Error al importar Excel')
@@ -440,6 +533,21 @@ export default function AdminProductosPage() {
       sortable: true,
       filterable: true,
       filterType: 'text' as const,
+      render: (value: string, row: Producto) => {
+        const nuevo = row.created_at
+          ? (Date.now() - new Date(row.created_at).getTime()) / 86400000 <= productoNuevoDias
+          : false
+        return (
+          <div className="flex items-center gap-2">
+            <span>{value}</span>
+            {nuevo && (
+              <span className="px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-[#0086c3] bg-[#00AEEF]/10 rounded-full border border-[#00AEEF]/30 uppercase">
+                Nuevo
+              </span>
+            )}
+          </div>
+        )
+      },
     },
     {
       key: 'proveedor_nombre',
@@ -498,7 +606,13 @@ export default function AdminProductosPage() {
       filterable: true,
       filterType: 'number' as const,
       render: (value: number | null) => (
-        <span className="font-semibold text-gray-900">{value != null ? formatCurrency(value) : '-'}</span>
+        value != null ? (
+          <span className="font-semibold text-gray-900">{formatCurrency(value)}</span>
+        ) : (
+          <span className="px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-amber-700 bg-amber-100 rounded-full border border-amber-200 uppercase">
+            Sin PVP
+          </span>
+        )
       ),
     },
     {
@@ -581,6 +695,20 @@ export default function AdminProductosPage() {
       ),
     },
     {
+      key: 'created_at',
+      label: 'Cargado',
+      sortable: true,
+      defaultVisible: false,
+      render: (value: string | null) =>
+        value ? (
+          <span className="text-gray-500 text-xs whitespace-nowrap" title={new Date(value).toLocaleString('es-AR')}>
+            {new Date(value).toLocaleDateString('es-AR')}
+          </span>
+        ) : (
+          <span className="text-gray-400">-</span>
+        ),
+    },
+    {
       key: 'acciones',
       label: 'Acciones',
       stickyRight: true,
@@ -624,7 +752,7 @@ export default function AdminProductosPage() {
         </div>
       ),
     },
-  ], [])
+  ], [productoNuevoDias])
 
   const handleScrape = async () => {
     setScrapeLoading(true)
@@ -636,7 +764,7 @@ export default function AdminProductosPage() {
         `PVP actualizado: ${updated} con cambios, ${skipped} sin cambios, ${failed} fallidos (de ${total} con URL).`,
         { id: t, duration: 7000 }
       )
-      fetchProductos()
+      fetchAll()
     } catch {
       toast.error('No se pudo ejecutar el scraper de PVP.', { id: t })
     } finally {
@@ -678,19 +806,20 @@ export default function AdminProductosPage() {
           </button>
           <button
             type="button"
+            onClick={() => setListasPublicasOpen(true)}
+            title="Links públicos de listas de precios (minorista, mayorista, comercio)"
+            className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-[#003087] bg-[#00AEEF]/10 rounded-lg hover:bg-[#00AEEF]/20 transition-colors"
+          >
+            <Link2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Listas públicas</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setBulkPriceModal(true)}
             className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 transition-colors"
           >
             <DollarSign className="w-4 h-4" />
             <span className="hidden sm:inline">Actualizar Precios</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setImportModalOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-[#003087] bg-[#003087]/10 rounded-lg hover:bg-[#003087]/20 transition-colors"
-          >
-            <Upload className="w-4 h-4" />
-            <span className="hidden sm:inline">Importar Excel</span>
           </button>
           <button
             type="button"
@@ -712,7 +841,7 @@ export default function AdminProductosPage() {
             className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] min-w-[200px]"
           >
             <option value="">Todos los proveedores</option>
-            {proveedores.map(p => (
+            {proveedorOpciones.map(p => (
               <option key={p.id} value={p.id}>{p.nombre}</option>
             ))}
           </select>
@@ -726,14 +855,38 @@ export default function AdminProductosPage() {
             className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] min-w-[200px]"
           >
             <option value="">Todos los laboratorios</option>
-            {laboratorios.map(l => (
+            {laboratorioOpciones.map(l => (
               <option key={l.id} value={l.id}>{l.nombre}</option>
             ))}
           </select>
         </div>
 
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] uppercase font-bold text-gray-400 ml-1">Herramientas</label>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSoloNuevos((v) => !v)}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${soloNuevos ? 'bg-[#00AEEF]/10 border-[#00AEEF] text-[#0086c3]' : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'}`}
+              title={`Productos cargados en los últimos ${productoNuevoDias} días`}
+            >
+              <Sparkles className="w-4 h-4" />
+              Nuevos
+            </button>
+            <button
+              type="button"
+              onClick={() => setSinPvp((v) => !v)}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${sinPvp ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'}`}
+              title="Productos sin PVP cargado"
+            >
+              <TagIcon className="w-4 h-4" />
+              Sin PVP
+            </button>
+          </div>
+        </div>
+
         <button
-          onClick={() => { setSearch(''); setProveedorId(''); setLaboratorioId(''); setColumnFilters({}) }}
+          onClick={() => { setSearch(''); setProveedorId(''); setLaboratorioId(''); setColumnFilters({}); setSoloNuevos(false); setSinPvp(false) }}
           className="mt-5 px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
         >
           Limpiar Filtros
@@ -742,15 +895,16 @@ export default function AdminProductosPage() {
 
       <DataGrid
         columns={columns}
-        data={data}
+        data={pagedData}
         isLoading={loading}
-        totalRows={total}
+        totalRows={filteredTotal}
         page={page}
         pageSize={pageSize}
         searchValue={search}
         onSearch={setSearch}
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
+        onSort={handleSort}
         onColumnFilter={(filters) => { setColumnFilters(filters); setPage(1) }}
         onExport={handleExport}
         searchPlaceholder="Buscar por codigo, nombre, origen..."
@@ -764,7 +918,7 @@ export default function AdminProductosPage() {
         laboratorios={laboratorios}
         loadingOptions={loadingOptions}
         onClose={closeModal}
-        onSaved={fetchProductos}
+        onSaved={handleProductoSaved}
       />
 
       {historialProducto && (
@@ -777,6 +931,8 @@ export default function AdminProductosPage() {
       {scraperLogsOpen && (
         <ScraperLogsModal onClose={() => setScraperLogsOpen(false)} />
       )}
+
+      <ListasPublicasModal open={listasPublicasOpen} onClose={() => setListasPublicasOpen(false)} />
 
       {/* Stock Adjustment Modal */}      {stockModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

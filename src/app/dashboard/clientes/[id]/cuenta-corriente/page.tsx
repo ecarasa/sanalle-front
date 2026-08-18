@@ -9,6 +9,18 @@ import { useAuth } from '@/hooks/useAuth'
 import { CuentaCorrienteResponse, CuentaCorrienteMovimiento } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
 
+// El backend emite los tipos en minúscula (pedido/pago/nota_credito/nota_debito/
+// deuda_inicial). Antes el front comparaba con 'Pago'/'Pedido'/'NC'/'ND' → coloreo
+// roto y etiqueta cruda. Este mapa unifica etiqueta + color.
+const TIPO_CC: Record<string, { label: string; badge: string }> = {
+  pedido: { label: 'Pedido', badge: 'bg-blue-100 text-blue-700' },
+  pago: { label: 'Pago', badge: 'bg-green-100 text-green-700' },
+  nota_credito: { label: 'N. Crédito', badge: 'bg-green-100 text-green-700' },
+  nota_debito: { label: 'N. Débito', badge: 'bg-blue-100 text-blue-700' },
+  deuda_inicial: { label: 'Saldo inicial', badge: 'bg-gray-100 text-gray-700' },
+}
+const tipoCC = (t: string) => TIPO_CC[t] ?? { label: t, badge: 'bg-gray-100 text-gray-700' }
+
 export default function CuentaCorrientePage() {
   useAuth()
   const router = useRouter()
@@ -223,14 +235,8 @@ export default function CuentaCorrientePage() {
                     <tr key={index} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
                       <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatDate(mov.fecha)}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                          mov.tipo === 'Pago' || mov.tipo === 'NC'
-                            ? 'bg-green-100 text-green-700'
-                            : mov.tipo === 'Pedido' || mov.tipo === 'ND'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'bg-gray-100 text-gray-700'
-                        }`}>
-                          {mov.tipo}
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${tipoCC(mov.tipo).badge}`}>
+                          {tipoCC(mov.tipo).label}
                         </span>
                       </td>
                       <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{mov.numero}</td>
@@ -268,14 +274,8 @@ export default function CuentaCorrientePage() {
                 <div key={index} className="p-4 space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        mov.tipo === 'Pago' || mov.tipo === 'NC'
-                          ? 'bg-green-100 text-green-700'
-                          : mov.tipo === 'Pedido' || mov.tipo === 'ND'
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'bg-gray-100 text-gray-700'
-                      }`}>
-                        {mov.tipo}
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${tipoCC(mov.tipo).badge}`}>
+                        {tipoCC(mov.tipo).label}
                       </span>
                       <span className="text-sm font-semibold text-gray-900">{mov.numero}</span>
                     </div>

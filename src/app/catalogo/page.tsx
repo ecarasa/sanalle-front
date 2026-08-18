@@ -3,6 +3,8 @@
 import { ShoppingBag, Store, User, Users } from 'lucide-react'
 import Link from 'next/link'
 
+const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'Vitalnova'
+
 export default function CatalogoPublico() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -16,7 +18,7 @@ export default function CatalogoPublico() {
               </div>
               <div>
                 <h1 className="text-xl sm:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-[#003087] to-blue-600">
-                  SANALLE
+                  {APP_NAME}
                 </h1>
                 <p className="text-[10px] sm:text-xs text-gray-500 font-medium tracking-wider uppercase">
                   Catálogo de Productos
@@ -74,7 +76,7 @@ export default function CatalogoPublico() {
       </main>
 
       <footer className="py-8 text-center text-gray-400 text-sm">
-        &copy; {new Date().getFullYear()} SANALLE - Droguería y Distribuidora de Medicamentos.
+        &copy; {new Date().getFullYear()} {APP_NAME} - Droguería y Distribuidora de Medicamentos.
       </footer>
     </div>
   )

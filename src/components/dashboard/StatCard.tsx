@@ -8,6 +8,9 @@ interface StatCardProps {
   icon: LucideIcon
   color?: 'blue' | 'red' | 'green' | 'cyan' | 'amber' | 'orange' | 'purple'
   subtitle?: string
+  /** Segundo importe en la misma tarjeta (ej: "Cobrado" debajo de "Vendido"). */
+  secondaryLabel?: string
+  secondaryValue?: string | number
 }
 
 // Degradé por color, alineado con el lenguaje visual del navbar.
@@ -21,7 +24,7 @@ const gradientMap: Record<NonNullable<StatCardProps['color']>, string> = {
   purple: 'linear-gradient(135deg, #A855F7 0%, #7C3AED 100%)',
 }
 
-export default function StatCard({ title, value, icon: Icon, color = 'blue', subtitle }: StatCardProps) {
+export default function StatCard({ title, value, icon: Icon, color = 'blue', subtitle, secondaryLabel, secondaryValue }: StatCardProps) {
   const gradient = gradientMap[color] || gradientMap.blue
   return (
     <div className="group relative overflow-hidden rounded-2xl border border-gray-200/60 bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg">
@@ -34,6 +37,12 @@ export default function StatCard({ title, value, icon: Icon, color = 'blue', sub
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{title}</p>
           <p className="mt-2 truncate text-2xl font-bold tracking-tight text-gray-900 tabular-nums">{value}</p>
+          {secondaryValue !== undefined && (
+            <div className="mt-2 border-t border-gray-100 pt-2">
+              {secondaryLabel && <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">{secondaryLabel}</p>}
+              <p className="truncate text-base font-bold text-gray-700 tabular-nums">{secondaryValue}</p>
+            </div>
+          )}
           {subtitle && <p className="mt-1 text-xs text-gray-400">{subtitle}</p>}
         </div>
         <div

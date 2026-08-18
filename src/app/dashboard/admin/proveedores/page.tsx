@@ -28,17 +28,35 @@ function PagoProveedorPanel({
 }) {
   const pagos = proveedor.pagos_pendientes ?? []
   const descuento = Number(proveedor.descuento)
-  const cashbackPct = Number(proveedor.cashback)
+  const cashbackParcial = Number(proveedor.cashback_parcial) || 0
+  const cashbackTotal = Number(proveedor.cashback_total) || 0
+  const tieneCashback = cashbackParcial > 0 || cashbackTotal > 0
+  const cashbackPendiente = Number(proveedor.cashback_pendiente) || 0
 
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [montosParciales, setMontosParciales] = useState<Record<number, string>>({})
   const [descCheck, setDescCheck] = useState(false)
-  const [cashbackCheck, setCashbackCheck] = useState(false)
+  const [cashbackCheck, setCashbackCheck] = useState(true)
   const [metodoPago, setMetodoPago] = useState('efectivo')
   const [balance, setBalance] = useState<number | null>(null)
   const [loadingBalance, setLoadingBalance] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [paying, setPaying] = useState(false)
+  const [acreditando, setAcreditando] = useState(false)
+
+  const handleAcreditarCashback = async () => {
+    setAcreditando(true)
+    try {
+      const res = await api.post<{ total: number }>(`/proveedores/${proveedor.id}/acreditar-cashback`)
+      toast.success(`Nota de crédito por ${formatCurrency(res.data.total)} generada`)
+      onPagado()
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(detail || 'Error al acreditar el cashback')
+    } finally {
+      setAcreditando(false)
+    }
+  }
 
   const fetchBalance = useCallback(async () => {
     setLoadingBalance(true)
@@ -119,8 +137,8 @@ function PagoProveedorPanel({
           aplicar_cashback: cashbackCheck,
         }
       )
-      const cashbackMsg = res.data.cashback_importe > 0
-        ? ` · NC crédito ${formatCurrency(res.data.cashback_importe)}`
+      const cashbackMsg = (res.data.cashback_acumulado ?? 0) > 0
+        ? ` · cashback +${formatCurrency(res.data.cashback_acumulado ?? 0)} (acumulado)`
         : ''
       toast.success(`Pago de ${formatCurrency(res.data.total_pagado)} registrado${cashbackMsg}`)
       setShowConfirm(false)
@@ -170,15 +188,15 @@ function PagoProveedorPanel({
               Descuento ({descuento}%)
             </label>
           )}
-          {cashbackPct > 0 && (
-            <label className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 cursor-pointer select-none">
+          {tieneCashback && (
+            <label className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 cursor-pointer select-none" title={`Parcial ${cashbackParcial}% · Total ${cashbackTotal}%`}>
               <input
                 type="checkbox"
                 checked={cashbackCheck}
                 onChange={e => setCashbackCheck(e.target.checked)}
                 className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
               />
-              Cashback ({cashbackPct}%)
+              Acumular cashback ({cashbackParcial}%/{cashbackTotal}%)
             </label>
           )}
 
@@ -208,6 +226,26 @@ function PagoProveedorPanel({
           )}
         </div>
       </div>
+
+      {/* Cashback acumulado (pendiente de acreditar) */}
+      {(tieneCashback || cashbackPendiente > 0) && (
+        <div className="flex items-center justify-between gap-3 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">
+          <div className="text-xs">
+            <span className="text-emerald-700 font-semibold">Cashback pendiente de acreditar: </span>
+            <span className="font-black text-emerald-800">{formatCurrency(cashbackPendiente)}</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleAcreditarCashback}
+            disabled={acreditando || cashbackPendiente <= 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Genera una nota de crédito por todo el cashback acumulado"
+          >
+            {acreditando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+            Acreditar cashback
+          </button>
+        </div>
+      )}
 
       {/* Payments list */}
       <div className="bg-gray-50 rounded-xl border border-gray-100 overflow-hidden">
@@ -385,10 +423,16 @@ function PagoProveedorPanel({
                     <span className="font-bold text-teal-600">-{descuento}%</span>
                   </div>
                 )}
-                {cashbackCheck && cashbackPct > 0 && (
+                {cashbackCheck && tieneCashback && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">Cashback generado</span>
-                    <span className="font-bold text-emerald-600">+{formatCurrency(total * cashbackPct / 100)}</span>
+                    <span className="text-gray-500">Cashback a acumular</span>
+                    <span className="font-bold text-emerald-600">+{formatCurrency(
+                      selectedPagos.reduce((s, p) => {
+                        const monto = parseFloat(montosParciales[p.id] || '0')
+                        const full = monto >= calcMaxMonto(Number(p.saldo_pendiente)) - 0.01
+                        return s + monto * (full ? cashbackTotal : cashbackParcial) / 100
+                      }, 0),
+                    )}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-sm">
@@ -692,8 +736,8 @@ export default function AdminProveedoresPage() {
                           <span className="font-bold text-teal-600">{row.descuento}%</span>
                         </div>
                         <div className="flex justify-between text-sm">
-                          <span className="text-gray-500">Cashback:</span>
-                          <span className="font-bold text-emerald-600">{row.cashback}%</span>
+                          <span className="text-gray-500">Cashback (parc./total):</span>
+                          <span className="font-bold text-emerald-600">{row.cashback_parcial ?? 0}% / {row.cashback_total ?? 0}%</span>
                         </div>
                       </div>
                     </div>

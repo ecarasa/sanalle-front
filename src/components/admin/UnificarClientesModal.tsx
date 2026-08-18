@@ -18,6 +18,35 @@ const LABELS: Record<string, string> = {
   solicitudes: 'Solicitudes',
 }
 
+// Campos escalares comparables (el valor se envía tal cual).
+const CAMPOS: { key: string; label: string }[] = [
+  { key: 'nombre', label: 'Nombre' },
+  { key: 'razon_social', label: 'Razón social' },
+  { key: 'cuit', label: 'CUIT' },
+  { key: 'domicilio', label: 'Domicilio' },
+  { key: 'telefono', label: 'Teléfono' },
+  { key: 'whatsapp', label: 'WhatsApp' },
+  { key: 'email', label: 'Email' },
+  { key: 'categoria', label: 'Categoría' },
+  { key: 'tipo', label: 'Tipo' },
+  { key: 'condicion_pago', label: 'Cond. de pago' },
+  { key: 'plazo_dias', label: 'Plazo (días)' },
+  { key: 'comentarios', label: 'Comentarios' },
+]
+
+// Campos FK: se muestran por nombre pero se envía el id.
+const CAMPOS_FK: { key: string; nameKey: string; label: string }[] = [
+  { key: 'localidad_id', nameKey: 'localidad_nombre', label: 'Localidad' },
+  { key: 'zona_id', nameKey: 'zona_nombre', label: 'Zona' },
+]
+
+type ClienteFull = Record<string, unknown>
+
+const mostrar = (v: unknown): string => {
+  if (v === null || v === undefined || v === '') return '—'
+  return String(v)
+}
+
 export default function UnificarClientesModal({
   onClose,
   onMerged,
@@ -33,6 +62,11 @@ export default function UnificarClientesModal({
   const [previewLoading, setPreviewLoading] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [merging, setMerging] = useState(false)
+
+  // Datos completos de ambos clientes + elección campo por campo ('origen' | 'destino').
+  const [origenFull, setOrigenFull] = useState<ClienteFull | null>(null)
+  const [destinoFull, setDestinoFull] = useState<ClienteFull | null>(null)
+  const [seleccion, setSeleccion] = useState<Record<string, 'origen' | 'destino'>>({})
 
   useEffect(() => {
     const load = async () => {
@@ -71,14 +105,48 @@ export default function UnificarClientesModal({
   const sameError = !!origenId && origenId === destinoId
   const canMerge = !!origenId && !!destinoId && !sameError
 
+  // Traer datos completos de ambos clientes para comparar campo por campo.
+  useEffect(() => {
+    if (!origenId || !destinoId || sameError) {
+      setOrigenFull(null)
+      setDestinoFull(null)
+      return
+    }
+    let cancel = false
+    Promise.all([
+      api.get(`/clientes/${origenId}`).then((r) => r.data),
+      api.get(`/clientes/${destinoId}`).then((r) => r.data),
+    ])
+      .then(([o, d]) => {
+        if (cancel) return
+        setOrigenFull(o)
+        setDestinoFull(d)
+        // Por defecto gana el DESTINO (comportamiento actual).
+        const inicial: Record<string, 'origen' | 'destino'> = {}
+        for (const c of [...CAMPOS, ...CAMPOS_FK]) inicial[c.key] = 'destino'
+        setSeleccion(inicial)
+      })
+      .catch(() => { if (!cancel) { setOrigenFull(null); setDestinoFull(null) } })
+    return () => { cancel = true }
+  }, [origenId, destinoId, sameError])
+
   const totalAsociados = preview ? Object.values(preview).reduce((a, b) => a + b, 0) : 0
 
   const handleMerge = async () => {
     setMerging(true)
     try {
+      // Construir campos_finales según la elección (origen/destino) por campo.
+      const campos_finales: Record<string, unknown> = {}
+      if (origenFull && destinoFull) {
+        for (const c of [...CAMPOS, ...CAMPOS_FK]) {
+          const fuente = seleccion[c.key] === 'origen' ? origenFull : destinoFull
+          campos_finales[c.key] = fuente[c.key] ?? null
+        }
+      }
       const res = await api.post('/clientes/merge', {
         origen_id: Number(origenId),
         destino_id: Number(destinoId),
+        campos_finales,
       })
       const m = res.data.movidos || {}
       toast.success(
@@ -185,6 +253,54 @@ export default function UnificarClientesModal({
               <p className="mt-3 text-xs text-amber-700">
                 ⚠️ Acción irreversible: el cliente origen se elimina definitivamente.
               </p>
+            </div>
+          )}
+
+          {/* Selección campo por campo: qué dato queda en el destino */}
+          {origenFull && destinoFull && !sameError && (
+            <div className="mt-5">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Elegí qué dato queda (tocá la columna). Por defecto gana el destino.
+              </p>
+              <div className="overflow-hidden rounded-xl border border-gray-200">
+                <div className="grid grid-cols-[1fr,1.2fr,1.2fr] bg-gray-50 text-[10px] font-black uppercase tracking-widest text-gray-400">
+                  <div className="px-3 py-2">Campo</div>
+                  <div className="px-3 py-2">Origen</div>
+                  <div className="px-3 py-2">Destino</div>
+                </div>
+                <div className="divide-y divide-gray-50">
+                  {[...CAMPOS, ...CAMPOS_FK].map((c) => {
+                    const isFk = 'nameKey' in c
+                    const displayKey = isFk ? (c as { nameKey: string }).nameKey : c.key
+                    const valO = mostrar(origenFull[displayKey])
+                    const valD = mostrar(destinoFull[displayKey])
+                    const pick = seleccion[c.key] || 'destino'
+                    // Si los valores coinciden, no tiene sentido resaltar elección.
+                    const iguales = valO === valD
+                    return (
+                      <div key={c.key} className="grid grid-cols-[1fr,1.2fr,1.2fr] items-stretch text-sm">
+                        <div className="px-3 py-2 text-xs font-medium text-gray-500 flex items-center">{c.label}</div>
+                        <button
+                          type="button"
+                          disabled={iguales}
+                          onClick={() => setSeleccion((prev) => ({ ...prev, [c.key]: 'origen' }))}
+                          className={`px-3 py-2 text-left transition-colors ${iguales ? 'text-gray-400' : pick === 'origen' ? 'bg-[#00AEEF]/10 text-[#003087] font-semibold ring-1 ring-inset ring-[#00AEEF]/40' : 'text-gray-600 hover:bg-gray-50'}`}
+                        >
+                          {valO}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={iguales}
+                          onClick={() => setSeleccion((prev) => ({ ...prev, [c.key]: 'destino' }))}
+                          className={`px-3 py-2 text-left transition-colors ${iguales ? 'text-gray-400' : pick === 'destino' ? 'bg-[#003087]/10 text-[#003087] font-semibold ring-1 ring-inset ring-[#003087]/30' : 'text-gray-600 hover:bg-gray-50'}`}
+                        >
+                          {valD}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </div>
