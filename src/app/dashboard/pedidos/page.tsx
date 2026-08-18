@@ -752,7 +752,7 @@ export default function PedidosPage() {
             pedido={row}
             isAdmin={isAdmin}
             onViewPdf={handleViewPdf}
-            onEdit={() => router.push(`/dashboard/pedidos/${row.id}/editar`)}
+            onEdit={() => window.open(`/dashboard/pedidos/${row.id}/editar`, '_blank')}
             onEstado={() => openEstadoModal(row)}
             onRegistrarPago={() => setPagoPedido(row)}
             onAsignar={() => setAsignarPedidoId(row.id)}
