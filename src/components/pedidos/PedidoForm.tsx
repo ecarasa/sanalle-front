@@ -403,6 +403,9 @@ export default function PedidoForm({
     return isSanalle ? producto.stock_a_cajas : producto.stock_b_cajas
   }, [sociedad, tipoDocumento])
 
+  // Sin stock suficiente para lo que se está tratando de agregar: bloquea el alta.
+  const modalStockInsuficiente = selectedProduct !== null && modalCantidad > getAvailableStock(selectedProduct, modalUnidad)
+
   const modalPrecioTotal = useMemo(
     () => modalCantidad * modalPrecio,
     [modalCantidad, modalPrecio]
@@ -538,6 +541,12 @@ export default function PedidoForm({
     }
     if (modalPrecio < 0) {
       toast.error('El precio no puede ser negativo')
+      return
+    }
+    const disponible = getAvailableStock(selectedProduct, modalUnidad)
+    if (modalCantidad > disponible) {
+      const u = modalUnidad === 'blister' ? 'blísters' : 'cajas'
+      toast.error(`No hay stock suficiente de ${selectedProduct.nombre}: disponible ${disponible} ${u}`)
       return
     }
 
@@ -1246,6 +1255,11 @@ export default function PedidoForm({
                         }}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
                       />
+                      {modalStockInsuficiente && (
+                        <p className="text-xs text-red-600 mt-1 font-medium">
+                          No hay stock suficiente ({getAvailableStock(selectedProduct, modalUnidad)} {modalUnidad === 'blister' ? 'blísters' : 'cajas'} disponibles).
+                        </p>
+                      )}
                     </div>
 
                     <div>
@@ -1278,7 +1292,7 @@ export default function PedidoForm({
                   <button
                     type="button"
                     onClick={() => addItem(true)}
-                    disabled={modalSinPreciosComercio}
+                    disabled={modalSinPreciosComercio || modalStockInsuficiente}
                     className="px-4 py-2 text-sm font-medium text-[#003087] bg-[#003087]/10 rounded-lg hover:bg-[#003087]/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     title="Agrega y vuelve al buscador para cargar otro"
                   >
@@ -1287,7 +1301,7 @@ export default function PedidoForm({
                   <button
                     type="button"
                     onClick={() => addItem(false)}
-                    disabled={modalSinPreciosComercio}
+                    disabled={modalSinPreciosComercio || modalStockInsuficiente}
                     className="px-4 py-2 text-sm font-medium text-white bg-[#003087] rounded-lg hover:bg-[#002570] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     Agregar
