@@ -18,7 +18,7 @@ export default function AdminLayout({
     if (!isLoading) {
       if (!user) {
         router.push('/login')
-      } else if (user.rol !== 'super_admin') {
+      } else if (!['admin', 'super_admin'].includes(user.rol)) {
         router.push('/dashboard')
       } else {
         setIsAuthorized(true)
