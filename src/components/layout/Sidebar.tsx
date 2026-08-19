@@ -43,7 +43,7 @@ export default function Sidebar({ user, onLogout, onChangePassword }: SidebarPro
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [configCollapsed, setConfigCollapsed] = useState(false);
+  const [configCollapsed, setConfigCollapsed] = useState(true);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   const isSuperAdmin = user.rol === 'super_admin';
