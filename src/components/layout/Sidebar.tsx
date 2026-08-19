@@ -10,7 +10,7 @@ import {
   Truck as TruckIcon, SlidersHorizontal, Building2, FlaskConical, Settings,
   ShoppingCart, Warehouse, Rocket, MessageSquare, ArrowLeftRight, ClipboardList,
   Store, PackagePlus, FileText, Wallet, Table2, Banknote, HandCoins,
-  ClipboardCheck, UserCheck, TrendingUp, LayoutDashboard, Percent,
+  ClipboardCheck, TrendingUp, LayoutDashboard, Percent,
 } from 'lucide-react';
 import { useFeatureFlags } from '@/hooks/useFeatureFlags';
 import { featureKeyForHref } from '@/lib/features';
@@ -106,7 +106,6 @@ export default function Sidebar({ user, onLogout, onChangePassword }: SidebarPro
           ...(hasAdminAccess
             ? [
                 { label: 'Logística', href: '/dashboard/entregas', icon: TruckIcon },
-                { label: 'Clientes pendientes', href: '/dashboard/admin/clientes-pendientes', icon: UserCheck },
                 { label: 'Comisiones', href: '/dashboard/reportes/comisiones-vendedores', icon: Percent },
               ]
             : [{ label: 'Mis Ventas', href: '/dashboard/mis-ventas', icon: TrendingUp }]),
