@@ -9,7 +9,7 @@ import { parseDate, today, getLocalTimeZone, type DateValue } from '@internation
 import api from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
-import { Producto, User } from '@/types'
+import { Deposito, Producto, User } from '@/types'
 import { useAuth } from '@/hooks/useAuth'
 import {
   GRUPO_LABEL,
@@ -37,6 +37,9 @@ export interface PedidoItemLocal {
   producto_id: number
   producto_nombre: string
   presentacion: string | null
+  /** Depósito del que sale la línea. null = usa el depósito del pedido. */
+  deposito_id?: number | null
+  deposito_nombre?: string | null
   cantidad: number
   /** Unidad de venta de la línea (caja/blister). */
   unidad_venta: UnidadVenta
@@ -229,6 +232,13 @@ export default function PedidoForm({
   const itemsRef = useRef(items)
   itemsRef.current = items
   const esComercio = tipoPrecio === 'comercio'
+  // Depósito del pedido: de dónde sale la mercadería. Es independiente de la
+  // sociedad (que ahora es solo facturación) y cada línea puede pisarlo si en
+  // ese depósito no hay stock.
+  const [depositos, setDepositos] = useState<Deposito[]>([])
+  const [depositoId, setDepositoId] = useState<number | null>(
+    initialItems.find((i) => i.deposito_id)?.deposito_id ?? null
+  )
   const [vendedorId, setVendedorId] = useState<number | undefined>(initialVendedorId)
   const [vendedores, setVendedores] = useState<User[]>([])
 
@@ -248,6 +258,9 @@ export default function PedidoForm({
   const [modalDescuento, setModalDescuento] = useState<number>(0)
   const [modalPrecioLista, setModalPrecioLista] = useState<number>(0)
   const [modalUnidad, setModalUnidad] = useState<UnidadVenta>('caja')
+  // Depósito de la línea que se está agregando. Arranca en el del pedido y solo
+  // se cambia si ahí no hay stock.
+  const [modalDeposito, setModalDeposito] = useState<number | null>(null)
 
   // Unidades de venta habilitadas para el producto elegido
   const modalUnidades = useMemo<UnidadVenta[]>(
@@ -263,6 +276,18 @@ export default function PedidoForm({
   // En un pedido de comercio, un producto sin precio de comercio no se puede agregar
   const modalSinPreciosComercio = esComercio && selectedProduct !== null && precioDeLista(modalPrecios, 'comercio') === null
 
+  // Depósitos disponibles para vender. El primero activo queda preseleccionado
+  // en un pedido nuevo; en uno existente manda el que ya tienen sus líneas.
+  useEffect(() => {
+    api.get<Deposito[]>('/depositos')
+      .then((res) => {
+        const activos = (res.data ?? []).filter((d) => d.activo)
+        setDepositos(activos)
+        setDepositoId((prev) => prev ?? activos[0]?.id ?? null)
+      })
+      .catch(() => toast.error('Error al cargar depósitos'))
+  }, [])
+
   // Fetch sellers if admin
   useEffect(() => {
     if (isAdmin) {
@@ -277,6 +302,7 @@ export default function PedidoForm({
     () =>
       items.map((item) => ({
         producto_id: item.producto_id,
+        deposito_id: item.deposito_id ?? depositoId,
         cantidad: item.cantidad,
         unidad_venta: item.unidad_venta,
         precio_lista: item.precio_lista,
@@ -284,7 +310,7 @@ export default function PedidoForm({
         precio_unitario: item.precio_unitario,
         precio_total: item.precio_total,
       })),
-    [items]
+    [items, depositoId]
   )
 
   // Robust Auto-save logic (Debounced and duplicate-protected)
@@ -300,6 +326,7 @@ export default function PedidoForm({
       transporte: transporte || null,
       direccionEntrega: direccionEntrega || null,
       sociedad: sociedad || null,
+      deposito_id: depositoId,
       fechaCompromisoPago: fechaCompromisoPago ? fechaCompromisoPago.toString() : null,
       despachado,
       tipo_precio: tipoPrecio,
@@ -333,6 +360,7 @@ export default function PedidoForm({
           transporte: transporte || null,
           direccion_entrega: direccionEntrega || null,
           sociedad: sociedad || null,
+          deposito_id: depositoId,
           fecha_compromiso_pago: fechaCompromisoPago ? fechaCompromisoPago.toString() : null,
           despachado,
           tipo_precio: tipoPrecio,
@@ -356,6 +384,7 @@ export default function PedidoForm({
     observacion,
     transporte,
     sociedad,
+    depositoId,
     fechaCompromisoPago,
     despachado,
     pedidoId,
@@ -390,21 +419,60 @@ export default function PedidoForm({
     [items]
   )
 
-  // Stock disponible EN LA UNIDAD pedida (cajas o blísters). Para blíster usa el
-  // total de blísters disponibles (cajas*blisters_por_caja + sueltos), no el de cajas.
-  const getAvailableStock = useCallback((producto: Producto, unidad: UnidadVenta = 'caja') => {
-    const isSanalle = sociedad.toLowerCase() === 'sanalle' || tipoDocumento === 'factura'
-    if (unidad === 'blister') {
-      const total = isSanalle ? producto.total_blisters_a : producto.total_blisters_b
-      if (total != null) return total
-      const cajas = isSanalle ? producto.stock_a_cajas : producto.stock_b_cajas
-      return cajas * (producto.blisters_por_caja || 1)
-    }
-    return isSanalle ? producto.stock_a_cajas : producto.stock_b_cajas
-  }, [sociedad, tipoDocumento])
+  // Stock disponible EN LA UNIDAD pedida (cajas o blísters), en el depósito del
+  // que sale la línea. Antes esto miraba la sociedad, que es justamente lo que
+  // hacía aparecer 0 cuando el stock estaba cargado en otro depósito.
+  const stockEnDeposito = useCallback(
+    (producto: Producto, deposito: number | null) =>
+      producto.stocks?.find((st) => st.deposito_id === deposito) ?? null,
+    []
+  )
+
+  const getAvailableStock = useCallback(
+    (producto: Producto, unidad: UnidadVenta = 'caja', deposito: number | null = depositoId) => {
+      const st = stockEnDeposito(producto, deposito)
+      if (!st) return 0
+      if (unidad === 'blister') return st.total_blisters
+      return st.cajas
+    },
+    [depositoId, stockEnDeposito]
+  )
+
+  // Depósitos donde este producto sí tiene stock, para poder sugerir el cambio
+  // en vez de dejar al vendedor frenado con un "no hay".
+  const depositosConStock = useCallback(
+    (producto: Producto, unidad: UnidadVenta) =>
+      depositos.filter((d) => getAvailableStock(producto, unidad, d.id) > 0),
+    [depositos, getAvailableStock]
+  )
+
+  // Depósito efectivo de la línea en curso: el elegido en el modal, o el del pedido.
+  const modalDepositoEfectivo = modalDeposito ?? depositoId
+
+  // Para cargar productos hacen falta las dos cosas: la sociedad define cómo se
+  // factura y el depósito de dónde sale el stock que se va a validar.
+  const faltaParaCargar = !sociedad ? 'sociedad' : !depositoId ? 'depósito' : null
+
+  // ¿El pedido sale de más de un depósito? Solo entonces vale la pena mostrar
+  // la columna por línea.
+  const hayDepositosMixtos = useMemo(
+    () => new Set(items.map((i) => i.deposito_id ?? depositoId)).size > 1,
+    [items, depositoId]
+  )
 
   // Sin stock suficiente para lo que se está tratando de agregar: bloquea el alta.
-  const modalStockInsuficiente = selectedProduct !== null && modalCantidad > getAvailableStock(selectedProduct, modalUnidad)
+  const modalStockInsuficiente =
+    selectedProduct !== null &&
+    modalCantidad > getAvailableStock(selectedProduct, modalUnidad, modalDepositoEfectivo)
+
+  // Otros depósitos donde sí hay, para ofrecer el cambio en el propio modal.
+  const modalAlternativas = useMemo(
+    () =>
+      selectedProduct
+        ? depositosConStock(selectedProduct, modalUnidad).filter((d) => d.id !== modalDepositoEfectivo)
+        : [],
+    [selectedProduct, modalUnidad, modalDepositoEfectivo, depositosConStock]
+  )
 
   const modalPrecioTotal = useMemo(
     () => modalCantidad * modalPrecio,
@@ -413,7 +481,7 @@ export default function PedidoForm({
 
   const handleCantidadChange = (e: React.ChangeEvent<HTMLInputElement>, selectedProduct: Producto) => {
     const cantidad = Number(e.target.value)
-    const disponible = getAvailableStock(selectedProduct, modalUnidad)
+    const disponible = getAvailableStock(selectedProduct, modalUnidad, modalDepositoEfectivo)
     if (cantidad > disponible) {
       const u = modalUnidad === 'blister' ? 'blísters' : 'cajas'
       toast.error(`No puedes pedir más de ${disponible} ${u}`)
@@ -543,10 +611,22 @@ export default function PedidoForm({
       toast.error('El precio no puede ser negativo')
       return
     }
-    const disponible = getAvailableStock(selectedProduct, modalUnidad)
+    const depLinea = modalDeposito ?? depositoId
+    if (!depLinea) {
+      toast.error('Elegí el depósito del que sale la mercadería')
+      return
+    }
+    const disponible = getAvailableStock(selectedProduct, modalUnidad, depLinea)
     if (modalCantidad > disponible) {
       const u = modalUnidad === 'blister' ? 'blísters' : 'cajas'
-      toast.error(`No hay stock suficiente de ${selectedProduct.nombre}: disponible ${disponible} ${u}`)
+      const depNombre = depositos.find((d) => d.id === depLinea)?.nombre ?? 'el depósito'
+      const alternativas = depositosConStock(selectedProduct, modalUnidad).filter((d) => d.id !== depLinea)
+      const sugerencia = alternativas.length
+        ? ` Hay stock en: ${alternativas.map((d) => d.nombre).join(', ')}.`
+        : ''
+      toast.error(
+        `No hay stock suficiente de ${selectedProduct.nombre} en ${depNombre}: disponible ${disponible} ${u}.${sugerencia}`
+      )
       return
     }
 
@@ -554,6 +634,8 @@ export default function PedidoForm({
       producto_id: selectedProduct.id,
       producto_nombre: selectedProduct.nombre,
       presentacion: selectedProduct.presentacion,
+      deposito_id: depLinea,
+      deposito_nombre: depositos.find((d) => d.id === depLinea)?.nombre ?? null,
       cantidad: modalCantidad,
       unidad_venta: modalUnidad,
       precio_lista: modalDescuento > 0 ? modalPrecioLista : null,
@@ -576,6 +658,7 @@ export default function PedidoForm({
       setModalDescuento(0)
       setModalPrecioLista(0)
       setModalUnidad('caja')
+      setModalDeposito(null)
     } else {
       setModalOpen(false)
     }
@@ -590,6 +673,10 @@ export default function PedidoForm({
       toast.error('Debe agregar al menos un producto')
       return
     }
+    if (!depositoId) {
+      toast.error('Elegí el depósito del que sale el pedido')
+      return
+    }
 
     setSaving(true)
     try {
@@ -602,6 +689,7 @@ export default function PedidoForm({
         transporte: transporte || null,
         direccion_entrega: direccionEntrega || null,
         sociedad: sociedad || null,
+        deposito_id: depositoId,
         fecha_compromiso_pago: fechaCompromisoPago ? fechaCompromisoPago.toString() : null,
         despachado,
         tipo_precio: tipoPrecio,
@@ -759,6 +847,23 @@ export default function PedidoForm({
             {!sociedad && <p className="text-[11px] text-amber-600 mt-1">Elegí una sociedad para poder cargar productos</p>}
           </div>
           <div>
+            <label className="block text-xs font-semibold mb-1 uppercase tracking-wide">
+              <span className={!depositoId ? 'text-amber-600' : 'text-gray-500'}>Depósito {!depositoId && '*'}</span>
+            </label>
+            <select
+              value={depositoId ?? ''}
+              required
+              onChange={(e) => setDepositoId(e.target.value ? Number(e.target.value) : null)}
+              className={`w-full px-3 py-1.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] ${!depositoId ? 'border-amber-400 bg-amber-50' : 'border-gray-300 bg-white'}`}
+            >
+              <option value="">Sin especificar</option>
+              {depositos.map((d) => (
+                <option key={d.id} value={d.id}>{d.nombre}</option>
+              ))}
+            </select>
+            <p className="text-[11px] text-gray-500 mt-1">De dónde sale la mercadería</p>
+          </div>
+          <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Bultos</label>
             <input type="number" min={0} value={bultos} onChange={(e) => setBultos(parseInt(e.target.value) || 0)}
               className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]" />
@@ -890,9 +995,9 @@ export default function PedidoForm({
           <button
             type="button"
             onClick={openModal}
-            disabled={saving || !sociedad}
+            disabled={saving || faltaParaCargar !== null}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors text-white bg-[#003087] hover:bg-[#002570] disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
-            title={!sociedad ? 'Elegí la sociedad primero' : 'Agregar producto'}
+            title={faltaParaCargar ? `Elegí la ${faltaParaCargar} primero` : 'Agregar producto'}
           >
             <Plus className="w-4 h-4" />
             Agregar Producto
@@ -905,15 +1010,17 @@ export default function PedidoForm({
               <Package className="w-7 h-7 text-[#003087]/40" />
             </div>
             <p className="text-sm font-semibold text-gray-700">Todavía no agregaste productos</p>
-            {!sociedad ? (
-              <p className="text-xs mt-1 text-amber-600 font-medium">Elegí una sociedad arriba para poder cargar productos.</p>
+            {faltaParaCargar ? (
+              <p className="text-xs mt-1 text-amber-600 font-medium">
+                Elegí {faltaParaCargar === 'sociedad' ? 'una sociedad' : 'un depósito'} arriba para poder cargar productos.
+              </p>
             ) : (
               <p className="text-xs mt-1 text-gray-400">Tocá &quot;Agregar Producto&quot; y cargá varios de corrido con &quot;Agregar y seguir&quot;.</p>
             )}
             <button
               type="button"
               onClick={openModal}
-              disabled={saving || !sociedad}
+              disabled={saving || faltaParaCargar !== null}
               className="mt-4 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors text-[#003087] bg-[#003087]/10 hover:bg-[#003087]/20 disabled:bg-gray-100 disabled:text-gray-400"
             >
               <Plus className="w-4 h-4" />
@@ -931,6 +1038,11 @@ export default function PedidoForm({
                   <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                     Presentación
                   </th>
+                  {hayDepositosMixtos && (
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                      Depósito
+                    </th>
+                  )}
                   <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">
                     Cantidad
                   </th>
@@ -953,6 +1065,13 @@ export default function PedidoForm({
                   <tr key={idx} className="border-b border-gray-50 hover:bg-gray-50/50">
                     <td className="px-4 py-2 text-gray-700">{item.producto_nombre}</td>
                     <td className="px-4 py-2 text-gray-700">{item.presentacion || '-'}</td>
+                    {hayDepositosMixtos && (
+                      <td className="px-4 py-2 text-gray-700">
+                        {item.deposito_nombre
+                          ?? depositos.find((d) => d.id === (item.deposito_id ?? depositoId))?.nombre
+                          ?? '-'}
+                      </td>
+                    )}
                     <td className="px-4 py-2 text-gray-700 text-right">
                       <span className="inline-flex items-center gap-1.5">
                         {item.cantidad}
@@ -1155,9 +1274,12 @@ export default function PedidoForm({
                           {selectedProduct.categoria_producto || '-'}
                         </div>
                         <div>
-                          <span className="block text-gray-400">Stock Disponible</span>
+                          <span className="block text-gray-400">
+                            Stock en {depositos.find((d) => d.id === modalDepositoEfectivo)?.nombre ?? 'depósito'}
+                          </span>
                           <span className="font-bold text-gray-900">
-                            {getAvailableStock(selectedProduct, modalUnidad)} {modalUnidad === 'blister' ? 'blísters' : 'cajas'}
+                            {getAvailableStock(selectedProduct, modalUnidad, modalDepositoEfectivo)}{' '}
+                            {modalUnidad === 'blister' ? 'blísters' : 'cajas'}
                           </span>
                         </div>
                       </div>
@@ -1167,6 +1289,39 @@ export default function PedidoForm({
                       <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                         <span className="font-semibold">{selectedProduct.nombre}</span> no tiene precio de comercio
                         cargado, así que no se puede agregar a un pedido de comercio.
+                      </div>
+                    )}
+
+                    {/* Depósito de la línea: por defecto el del pedido; se cambia
+                        cuando la mercadería tiene que salir de otro. */}
+                    {depositos.length > 1 && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Depósito</label>
+                        <div className="flex flex-wrap gap-2">
+                          {depositos.map((d) => {
+                            const disp = getAvailableStock(selectedProduct, modalUnidad, d.id)
+                            const activo = modalDepositoEfectivo === d.id
+                            return (
+                              <button
+                                key={d.id}
+                                type="button"
+                                onClick={() => setModalDeposito(d.id)}
+                                className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                                  activo
+                                    ? 'border-[#003087] bg-blue-50 text-[#003087] font-semibold'
+                                    : disp > 0
+                                      ? 'border-gray-300 bg-white text-gray-700 hover:border-[#003087]'
+                                      : 'border-gray-200 bg-gray-50 text-gray-400'
+                                }`}
+                              >
+                                {d.nombre}
+                                <span className="ml-1.5 font-mono">
+                                  {disp} {modalUnidad === 'blister' ? 'bl' : 'cj'}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
                       </div>
                     )}
 
@@ -1245,7 +1400,7 @@ export default function PedidoForm({
                         type="number"
                         min={1}
                         value={modalCantidad}
-                        max={getAvailableStock(selectedProduct, modalUnidad)}
+                        max={getAvailableStock(selectedProduct, modalUnidad, modalDepositoEfectivo)}
                         onChange={(e) => handleCantidadChange(e, selectedProduct)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
@@ -1256,9 +1411,31 @@ export default function PedidoForm({
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
                       />
                       {modalStockInsuficiente && (
-                        <p className="text-xs text-red-600 mt-1 font-medium">
-                          No hay stock suficiente ({getAvailableStock(selectedProduct, modalUnidad)} {modalUnidad === 'blister' ? 'blísters' : 'cajas'} disponibles).
-                        </p>
+                        <div className="text-xs mt-1">
+                          <p className="text-red-600 font-medium">
+                            No hay stock suficiente en{' '}
+                            {depositos.find((d) => d.id === modalDepositoEfectivo)?.nombre ?? 'este depósito'} (
+                            {getAvailableStock(selectedProduct, modalUnidad, modalDepositoEfectivo)}{' '}
+                            {modalUnidad === 'blister' ? 'blísters' : 'cajas'} disponibles).
+                          </p>
+                          {modalAlternativas.length > 0 && (
+                            <p className="text-gray-600 mt-1">
+                              Hay stock en:{' '}
+                              {modalAlternativas.map((d, i) => (
+                                <span key={d.id}>
+                                  {i > 0 && ', '}
+                                  <button
+                                    type="button"
+                                    onClick={() => setModalDeposito(d.id)}
+                                    className="text-[#003087] font-semibold underline underline-offset-2"
+                                  >
+                                    {d.nombre} ({getAvailableStock(selectedProduct, modalUnidad, d.id)})
+                                  </button>
+                                </span>
+                              ))}
+                            </p>
+                          )}
+                        </div>
                       )}
                     </div>
 

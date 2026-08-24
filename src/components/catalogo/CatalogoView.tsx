@@ -408,7 +408,7 @@ export default function CatalogoView({ grupo, token }: Props) {
                             })()}
                           </td>
                           <td className="px-4 py-2.5">
-                            <DisponibleBadge stock={(row.stock_a_cajas || 0) + (row.stock_b_cajas || 0)} />
+                            <DisponibleBadge stock={row.stock_total_cajas || 0} />
                           </td>
                           {listas.map((lista) => (
                             <td key={lista.key} className="px-4 py-2.5">

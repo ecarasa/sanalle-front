@@ -7,7 +7,7 @@ import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { useDebounce } from '@/hooks/useDebounce'
-import { Producto, Proveedor, PaginatedResponse, Laboratorio } from '@/types'
+import { Deposito, Producto, Proveedor, PaginatedResponse, Laboratorio } from '@/types'
 import { formatCurrency } from '@/lib/utils'
 import ProductoModal from '@/components/admin/ProductoModal'
 
@@ -67,6 +67,9 @@ export default function NuevoIngresoPage() {
   const [catalogo, setCatalogo] = useState<ConceptoImpositivo[]>([])
 
   const [sociedad, setSociedad] = useState('Sanalle')
+  // Depósito al que entra la mercadería. Ya no se deduce de la sociedad.
+  const [depositos, setDepositos] = useState<Deposito[]>([])
+  const [depositoId, setDepositoId] = useState<number | null>(null)
 
   const [productoSearch, setProductoSearch] = useState('')
   const [productos, setProductos] = useState<Producto[]>([])
@@ -89,6 +92,17 @@ export default function NuevoIngresoPage() {
         setCatalogo(iRes.data.items)
       } catch { /* ignore */ }
     })()
+  }, [])
+
+  // Depósitos disponibles: el primero queda preseleccionado.
+  useEffect(() => {
+    api.get<Deposito[]>('/depositos')
+      .then((res) => {
+        const activos = (res.data ?? []).filter((d) => d.activo)
+        setDepositos(activos)
+        setDepositoId((prev) => prev ?? activos[0]?.id ?? null)
+      })
+      .catch(() => toast.error('Error al cargar depósitos'))
   }, [])
 
   // Auto-calculate Due Date based on provider's plazo_pago
@@ -186,6 +200,7 @@ export default function NuevoIngresoPage() {
     e.preventDefault()
     if (!proveedorId) { toast.error('Debe seleccionar un proveedor'); return }
     if (!numeroComprobante.trim()) { toast.error('El N° de comprobante es obligatorio'); return }
+    if (!depositoId) { toast.error('Elegí el depósito al que entra la mercadería'); return }
     const validItems = items.filter((item) => item.producto_id !== null)
     if (validItems.length === 0) { toast.error('Agregue al menos un producto'); return }
     if (validItems.some((item) => Number(item.cantidad_cajas) <= 0 && Number(item.cantidad_blisters) <= 0)) {
@@ -198,7 +213,7 @@ export default function NuevoIngresoPage() {
       await api.post('/ingresos-mercaderia', {
         fecha,
         fecha_vencimiento: fechaVencimiento,
-        destino: sociedad === 'Farmacare' ? 'B' : 'A',
+        deposito_id: depositoId,
         proveedor_id: proveedorId,
         numero_comprobante: numeroComprobante.trim(),
         observacion: observacion || null,
@@ -255,8 +270,24 @@ export default function NuevoIngresoPage() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Sociedad</label>
             <select value={sociedad} onChange={(e) => setSociedad(e.target.value)} className={`${inputCls} bg-white`}>
-              <option value="Sanalle">Sanalle (Stock A / blanco)</option>
-              <option value="Farmacare">Farmacare (Stock B / negro)</option>
+              <option value="Sanalle">Sanalle</option>
+              <option value="Farmacare">Farmacare</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Depósito <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={depositoId ?? ''}
+              onChange={(e) => setDepositoId(e.target.value ? Number(e.target.value) : null)}
+              className={`${inputCls} bg-white`}
+              required
+            >
+              <option value="">Elegí el depósito</option>
+              {depositos.map((d) => (
+                <option key={d.id} value={d.id}>{d.nombre}</option>
+              ))}
             </select>
           </div>
           <div>
@@ -326,7 +357,9 @@ export default function NuevoIngresoPage() {
                           </div>
                           <div className="flex justify-between items-center mt-1">
                             <span className="text-xs text-gray-500">Código: {p.codigo}</span>
-                            <span className="text-xs text-gray-400">Stock: {p.stock_a_cajas}</span>
+                            <span className="text-xs text-gray-400">
+                              Stock: {(p.stocks ?? []).reduce((acc, st) => acc + st.cajas, 0)}
+                            </span>
                           </div>
                         </button>
                       )) : productoSearch.length > 2 && (

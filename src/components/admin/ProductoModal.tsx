@@ -13,10 +13,6 @@ interface ProductoForm {
   codigo: string
   nombre: string
   foto_url: string
-  stock_a_cajas: string
-  stock_a_blisters: string
-  stock_b_cajas: string
-  stock_b_blisters: string
   stock_minimo_cajas: string
   stock_minimo_blisters: string
   categoria_producto: string
@@ -48,10 +44,6 @@ const emptyForm: ProductoForm = {
   codigo: '',
   nombre: '',
   foto_url: '',
-  stock_a_cajas: '0',
-  stock_a_blisters: '0',
-  stock_b_cajas: '0',
-  stock_b_blisters: '0',
   stock_minimo_cajas: '0',
   stock_minimo_blisters: '0',
   categoria_producto: 'GENERICO',
@@ -155,10 +147,6 @@ export default function ProductoModal({ open, editingProducto, proveedores, labo
         codigo: editingProducto.codigo,
         nombre: editingProducto.nombre,
         foto_url: editingProducto.foto_url || '',
-        stock_a_cajas: String(editingProducto.stock_a_cajas),
-        stock_a_blisters: String(editingProducto.stock_a_blisters),
-        stock_b_cajas: String(editingProducto.stock_b_cajas),
-        stock_b_blisters: String(editingProducto.stock_b_blisters),
         stock_minimo_cajas: String(editingProducto.stock_minimo_cajas),
         stock_minimo_blisters: String(editingProducto.stock_minimo_blisters),
         categoria_producto: editingProducto.categoria_producto || 'GENERICO',
@@ -256,10 +244,6 @@ export default function ProductoModal({ open, editingProducto, proveedores, labo
         codigo: form.codigo,
         nombre: form.nombre,
         foto_url: form.foto_url || null,
-        stock_a_cajas: parseInt(form.stock_a_cajas) || 0,
-        stock_a_blisters: parseInt(form.stock_a_blisters) || 0,
-        stock_b_cajas: parseInt(form.stock_b_cajas) || 0,
-        stock_b_blisters: parseInt(form.stock_b_blisters) || 0,
         stock_minimo_cajas: parseInt(form.stock_minimo_cajas) || 0,
         stock_minimo_blisters: parseInt(form.stock_minimo_blisters) || 0,
         categoria_producto: form.categoria_producto || null,
@@ -578,43 +562,8 @@ export default function ProductoModal({ open, editingProducto, proveedores, labo
               </p>
             </div>
 
-            {/* Stock A */}
-            {/* <div className="rounded-lg border border-blue-100 bg-blue-50/50 p-3 space-y-2">
-              <p className="text-xs font-bold text-blue-700 uppercase tracking-wide">Stock A</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Cajas</label>
-                  <input type="number" min="0" value={form.stock_a_cajas}
-                    onChange={(e) => setForm({ ...form, stock_a_cajas: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Blisters sueltos</label>
-                  <input type="number" min="0" value={form.stock_a_blisters}
-                    onChange={(e) => setForm({ ...form, stock_a_blisters: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400" />
-                </div>
-              </div>
-            </div> */}
-
-            {/* Stock B */}
-            {/* <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
-              <p className="text-xs font-bold text-slate-600 uppercase tracking-wide">Stock B</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Cajas</label>
-                  <input type="number" min="0" value={form.stock_b_cajas}
-                    onChange={(e) => setForm({ ...form, stock_b_cajas: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Blisters sueltos</label>
-                  <input type="number" min="0" value={form.stock_b_blisters}
-                    onChange={(e) => setForm({ ...form, stock_b_blisters: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-400" />
-                </div>
-              </div>
-            </div> */}
+            {/* El stock no se edita acá: se carga por depósito desde
+                "Ajuste de stock", que deja movimiento y responsable. */}
 
             {/* Mínimos */}
             <div className="grid grid-cols-2 gap-3">

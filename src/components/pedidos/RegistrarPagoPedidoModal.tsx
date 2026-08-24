@@ -110,7 +110,8 @@ export default function RegistrarPagoPedidoModal({ pedido, open, onClose, onSucc
         tipo_pago: tipoPago,
         fecha_recepcion: isoFecha,
         observacion: observacion.trim() || null,
-        cuenta_id: cuentaId ? Number(cuentaId) : null,
+        // Pasamanos: no queda asociado a ninguna cuenta real (es tránsito, no caja).
+        cuenta_id: pagarProveedor ? null : (cuentaId ? Number(cuentaId) : null),
         es_puente: pagarProveedor,
       })
 
@@ -197,21 +198,23 @@ export default function RegistrarPagoPedidoModal({ pedido, open, onClose, onSucc
             </select>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Cuenta</label>
-            <select
-              value={cuentaId}
-              onChange={(e) => setCuentaId(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
-            >
-              {cuentas.length === 0 && <option value="">(cuenta por defecto)</option>}
-              {cuentas.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre}{c.es_default ? ' (default)' : ''}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!pagarProveedor && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Cuenta</label>
+              <select
+                value={cuentaId}
+                onChange={(e) => setCuentaId(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
+              >
+                {cuentas.length === 0 && <option value="">(cuenta por defecto)</option>}
+                {cuentas.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nombre}{c.es_default ? ' (default)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Fecha</label>

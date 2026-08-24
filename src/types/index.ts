@@ -148,27 +148,40 @@ export interface ClienteConDeuda extends Cliente {
 }
 
 
+/** Depósito / almacén desde el que se vende y al que ingresa mercadería. */
+export interface Deposito {
+  id: number;
+  nombre: string;
+  activo: boolean;
+  orden: number;
+}
+
+/** Stock de un producto en un depósito puntual. */
+export interface StockDeposito {
+  deposito_id: number;
+  nombre: string | null;
+  orden: number;
+  activo: boolean;
+  cajas: number;
+  blisters: number;
+  /** Comprometido en pedidos creados y no entregados. */
+  reservado_cajas: number;
+  reservado_blisters: number;
+  /** Vendible, ya expresado en blísters: es contra esto que se valida una venta. */
+  total_blisters: number;
+  reservado_total_blisters: number;
+}
+
 export interface Producto {
   id: number;
   codigo: string;
   nombre: string;
   foto_url: string | null;
-  // Stock A = Sanalle / Factura (blanco)
-  stock_a_cajas: number;
-  stock_a_blisters: number;
-  stock_reservado_a_cajas: number;
-  stock_reservado_a_blisters: number;
-  // Stock B = Farmacare / Remito (negro)
-  stock_b_cajas: number;
-  stock_b_blisters: number;
-  stock_reservado_b_cajas: number;
-  stock_reservado_b_blisters: number;
+  // Stock por depósito: una entrada por depósito donde el producto tuvo movimiento.
+  stocks: StockDeposito[];
   // Mínimos
   stock_minimo_cajas: number;
   stock_minimo_blisters: number;
-  // Totales en blisters (calculados por backend)
-  total_blisters_a: number | null;
-  total_blisters_b: number | null;
   // Unidades
   blisters_por_caja: number | null;
   comprimidos_por_blister: number | null;
@@ -205,6 +218,9 @@ export interface Producto {
 export interface PedidoItem {
   id?: number;
   producto_id: number;
+  /** Depósito del que sale la línea. */
+  deposito_id?: number | null;
+  deposito_nombre?: string | null;
   cantidad: number;
   cantidad_cajas?: number;
   cantidad_blisters?: number;
@@ -226,8 +242,8 @@ export interface ProductoPublico {
   codigo: string;
   nombre: string;
   foto_url: string | null;
-  stock_a_cajas: number;
-  stock_b_cajas: number;
+  /** Total de cajas sumando depósitos activos. */
+  stock_total_cajas: number;
   categoria_producto: string | null;
   presentacion: string | null;
   comprimidos_por_blister: number | null;
@@ -275,6 +291,8 @@ export interface Pedido {
   fecha_compromiso_pago: string | null;
   despachado: boolean;
   sociedad: string | null;
+  /** Nombres de los depósitos de los que sale el pedido. */
+  depositos?: string[];
   importe_total: number;
   saldo_pendiente: number;
   observacion: string | null;

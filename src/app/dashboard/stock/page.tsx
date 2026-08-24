@@ -8,7 +8,7 @@ import { formatCurrency } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useAuth } from '@/hooks/useAuth'
 import DataGrid from '@/components/grilla/DataGrid'
-import { Producto, PaginatedResponse } from '@/types'
+import { Deposito, Producto, PaginatedResponse } from '@/types'
 
 function StockBadge({ stock }: { stock: number }) {
   let colorClass = 'bg-red-100 text-red-700'
@@ -35,6 +35,7 @@ export default function StockPage() {
   const [data, setData] = useState<Producto[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [depositos, setDepositos] = useState<Deposito[]>([])
 
   const debouncedSearch = useDebounce(search, 400)
 
@@ -61,6 +62,13 @@ export default function StockPage() {
   useEffect(() => {
     fetchProductos()
   }, [fetchProductos])
+
+  // Los depósitos definen las columnas de stock de la grilla.
+  useEffect(() => {
+    api.get<Deposito[]>('/depositos')
+      .then((res) => setDepositos((res.data ?? []).filter((d) => d.activo)))
+      .catch(() => toast.error('Error al cargar depósitos'))
+  }, [])
 
   useEffect(() => {
     setPage(1)
@@ -174,39 +182,41 @@ export default function StockPage() {
       filterType: 'number' as const,
       render: (value: number | null) => value || '-',
     },
+    // Una columna de stock por depósito, con lo reservado al lado cuando lo hay.
+    // Antes eran dos columnas fijas (A/B) y los depósitos nuevos no se veían.
+    ...depositos.map((dep) => ({
+      key: `stock_dep_${dep.id}`,
+      label: dep.nombre,
+      sortable: false,
+      render: (_value: unknown, row: Producto) => {
+        const st = row.stocks?.find((x) => x.deposito_id === dep.id)
+        const reservado = st?.reservado_cajas ?? 0
+        return (
+          <div className="flex items-center gap-1.5">
+            <StockBadge stock={st?.cajas ?? 0} />
+            {(st?.blisters ?? 0) > 0 && (
+              <span className="text-[10px] text-gray-500">+{st?.blisters}bl</span>
+            )}
+            {reservado > 0 && (
+              <span className="text-[10px] text-amber-600" title="Reservado en pedidos abiertos">
+                ({reservado} res.)
+              </span>
+            )}
+          </div>
+        )
+      },
+    })),
     {
-      key: 'stock_a_cajas',
-      label: 'Stock A',
+      key: 'stock_total_cajas',
+      label: 'Stock Total',
       sortable: true,
       filterable: true,
       filterType: 'number' as const,
-      render: (value: number) => <StockBadge stock={value} />,
-    },
-    {
-      key: 'stock_disponible_a',
-      label: 'Disp. A',
-      sortable: true,
-      render: (_value: unknown, row: Producto) => {
-        const disponible = (row.stock_a_cajas ?? 0) - (row.stock_reservado_a_cajas ?? 0)
-        return <span className="font-semibold text-gray-900">{disponible}</span>
-      },
-    },
-    {
-      key: 'stock_b_cajas',
-      label: 'Stock B',
-      sortable: true,
-      filterable: true,
-      filterType: 'number' as const,
-      render: (value: number) => <StockBadge stock={value} />,
-    },
-    {
-      key: 'stock_disponible_b',
-      label: 'Disp. B',
-      sortable: true,
-      render: (_value: unknown, row: Producto) => {
-        const disponible = (row.stock_b_cajas ?? 0) - (row.stock_reservado_b_cajas ?? 0)
-        return <span className="font-semibold text-gray-900">{disponible}</span>
-      },
+      render: (_value: unknown, row: Producto) => (
+        <span className="font-semibold text-gray-900">
+          {(row.stocks ?? []).reduce((acc, st) => acc + st.cajas, 0)}
+        </span>
+      ),
     },
     {
       key: 'precio_venta_minorista',
@@ -270,7 +280,7 @@ export default function StockPage() {
         },
       ]
       : []),
-  ], [isVentas, isAdmin])
+  ], [isVentas, isAdmin, depositos])
 
   return (
     <div className="space-y-6">
@@ -304,9 +314,10 @@ export default function StockPage() {
         onExport={handleExport}
         searchPlaceholder="Buscar por código, nombre, categoría..."
         storageKey="stock-grid-columns"
-        rowClassName={(row) => {
+        rowClassName={(row: Producto) => {
           const stockMinimo = row.stock_minimo_cajas
-          if (stockMinimo && stockMinimo > 0 && row.stock_a_cajas <= stockMinimo) {
+          const totalCajas = (row.stocks ?? []).reduce((acc, st) => acc + st.cajas, 0)
+          if (stockMinimo && stockMinimo > 0 && totalCajas <= stockMinimo) {
             return 'bg-red-50'
           }
           return ''

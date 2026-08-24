@@ -7,7 +7,7 @@ import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { useDebounce } from '@/hooks/useDebounce'
-import { Cliente, Producto, PaginatedResponse } from '@/types'
+import { Cliente, Deposito, Producto, PaginatedResponse } from '@/types'
 import { formatCurrency } from '@/lib/utils'
 
 interface NotaItem {
@@ -45,7 +45,9 @@ export default function NuevaNotaPage() {
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
   const [motivo, setMotivo] = useState('')
   const [afectaStock, setAfectaStock] = useState(false)
-  const [stockTipo, setStockTipo] = useState<'A' | 'B'>('A')
+  // Depósito afectado cuando la nota mueve stock (antes era stock A/B fijo).
+  const [depositos, setDepositos] = useState<Deposito[]>([])
+  const [depositoId, setDepositoId] = useState<number | null>(null)
   const [items, setItems] = useState<NotaItem[]>([{ ...emptyItem }])
 
   const [productoSearch, setProductoSearch] = useState('')
@@ -55,6 +57,17 @@ export default function NuevaNotaPage() {
   const debouncedProductoSearch = useDebounce(productoSearch, 300)
 
   const [saving, setSaving] = useState(false)
+
+  // Depósitos, para cuando la nota afecta stock.
+  useEffect(() => {
+    api.get<Deposito[]>('/depositos')
+      .then((res) => {
+        const activos = (res.data ?? []).filter((d) => d.activo)
+        setDepositos(activos)
+        setDepositoId((prev) => prev ?? activos[0]?.id ?? null)
+      })
+      .catch(() => toast.error('Error al cargar depósitos'))
+  }, [])
 
   // Search clientes
   useEffect(() => {
@@ -176,7 +189,7 @@ export default function NuevaNotaPage() {
           precio_total: Number(item.precio_total),
         })),
         afecta_stock: afectaStock,
-        stock_tipo: afectaStock ? stockTipo : null,
+        deposito_id: afectaStock ? depositoId : null,
       })
       toast.success(`Nota de ${tipo} creada correctamente`)
       router.push('/dashboard/admin/notas-credito-debito')
@@ -296,31 +309,17 @@ export default function NuevaNotaPage() {
 
             {afectaStock && (
               <div className="flex items-center gap-3 animate-in fade-in slide-in-from-left-2 duration-200">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Impactar en:</span>
-                <div className="flex p-1 bg-white rounded-lg border border-gray-200 shadow-sm">
-                  <button
-                    type="button"
-                    onClick={() => setStockTipo('A')}
-                    className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
-                      stockTipo === 'A' 
-                        ? 'bg-[#003087] text-white shadow-sm' 
-                        : 'text-gray-400 hover:text-gray-600'
-                    }`}
-                  >
-                    STOCK A
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStockTipo('B')}
-                    className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
-                      stockTipo === 'B' 
-                        ? 'bg-[#003087] text-white shadow-sm' 
-                        : 'text-gray-400 hover:text-gray-600'
-                    }`}
-                  >
-                    STOCK B
-                  </button>
-                </div>
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Depósito:</span>
+                <select
+                  value={depositoId ?? ''}
+                  onChange={(e) => setDepositoId(e.target.value ? Number(e.target.value) : null)}
+                  className="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
+                >
+                  <option value="">Elegí el depósito</option>
+                  {depositos.map((d) => (
+                    <option key={d.id} value={d.id}>{d.nombre}</option>
+                  ))}
+                </select>
               </div>
             )}
           </div>

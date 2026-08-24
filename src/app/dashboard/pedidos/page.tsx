@@ -127,6 +127,7 @@ const SOCIEDAD_BADGE: Record<string, string> = {
 interface PedidoAccionesMenuProps {
   pedido: Pedido
   isAdmin: boolean
+  currentUserId?: number
   onViewPdf: (id: number, sinValores: boolean) => void
   onEdit: () => void
   onEstado: () => void
@@ -138,6 +139,7 @@ interface PedidoAccionesMenuProps {
 function PedidoAccionesMenu({
   pedido,
   isAdmin,
+  currentUserId,
   onViewPdf,
   onEdit,
   onEstado,
@@ -152,10 +154,13 @@ function PedidoAccionesMenu({
 
   const noFinalizado = pedido.shipping_status !== 'entregado' && pedido.shipping_status !== 'cancelado'
   const puedeEliminar = pedido.shipping_status === 'pendiente' || pedido.shipping_status === 'en_preparacion'
+  // El backend sólo permite registrar el pago a admin/super_admin o al vendedor
+  // dueño del pedido (POST /pagos/pedido/{id}) — el botón debe reflejar esa regla.
   const puedePagar =
     pedido.shipping_status !== 'cancelado' &&
     pedido.payment_status !== 'pagado' &&
-    pedido.payment_status !== 'cancelado'
+    pedido.payment_status !== 'cancelado' &&
+    (isAdmin || pedido.vendedor_id === currentUserId)
 
   // Cierra al clickear afuera (contemplando el menú, que va por portal).
   useEffect(() => {
@@ -751,6 +756,7 @@ export default function PedidosPage() {
           <PedidoAccionesMenu
             pedido={row}
             isAdmin={isAdmin}
+            currentUserId={user?.id}
             onViewPdf={handleViewPdf}
             onEdit={() => window.open(`/dashboard/pedidos/${row.id}/editar`, '_blank')}
             onEstado={() => openEstadoModal(row)}
@@ -761,7 +767,7 @@ export default function PedidosPage() {
         </div>
       ),
     },
-  ], [router, isAdmin, selectedIds, toggleSelect])
+  ], [router, isAdmin, user?.id, selectedIds, toggleSelect])
 
   return (
     <div className="space-y-6">

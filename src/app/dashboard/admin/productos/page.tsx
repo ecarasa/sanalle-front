@@ -15,7 +15,7 @@ import ScraperLogsModal from '@/components/admin/ScraperLogsModal'
 import ListasPublicasModal from '@/components/admin/ListasPublicasModal'
 import { listasDe, MargenField } from '@/lib/listas'
 import { filtrarProductos, ordenarProductos } from '@/lib/productosFiltro'
-import { Producto, PaginatedResponse, Proveedor, Laboratorio } from '@/types'
+import { Deposito, Producto, PaginatedResponse, Proveedor, Laboratorio } from '@/types'
 
 const LISTAS_COMERCIO = listasDe('comercio')
 
@@ -24,8 +24,6 @@ type BulkPriceCampo = 'pvp' | 'costo_porcentaje' | MargenField
 const MARGEN_CAMPOS: MargenField[] = ['margen_minorista', 'margen_mayorista', ...LISTAS_COMERCIO.map((l) => l.margenField)]
 
 const esMargen = (campo: BulkPriceCampo): campo is MargenField => (MARGEN_CAMPOS as string[]).includes(campo)
-
-type StockDep = { deposito_id: number; nombre: string; orden: number; activo: boolean; cajas: number; blisters: number }
 
 const DEPO_BADGE_COLORS = [
   'bg-blue-50 text-blue-700 border-blue-200',
@@ -36,12 +34,12 @@ const DEPO_BADGE_COLORS = [
   'bg-rose-50 text-rose-700 border-rose-200',
 ]
 
-function StockDepBadge({ nombre, cajas, blisters, idx }: { nombre: string; cajas: number; blisters: number; idx: number }) {
+function StockDepBadge({ nombre, cajas, blisters, idx }: { nombre: string | null; cajas: number; blisters: number; idx: number }) {
   const total = cajas + blisters / 100
   const cls = total > 0 ? DEPO_BADGE_COLORS[idx % DEPO_BADGE_COLORS.length] : 'bg-gray-50 text-gray-400 border-gray-200'
   const short = (nombre || '?').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 3).toUpperCase() || '?'
   return (
-    <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-medium ${cls}`} title={nombre}>
+    <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-medium ${cls}`} title={nombre ?? undefined}>
       <span className="font-bold">{short}</span>
       <span>{cajas}cj{blisters > 0 ? ` +${blisters}bl` : ''}</span>
     </div>
@@ -49,21 +47,15 @@ function StockDepBadge({ nombre, cajas, blisters, idx }: { nombre: string; cajas
 }
 
 function DualStockCell({ row }: { row: Producto }) {
-  const stocks = (row as Producto & { stocks?: StockDep[] }).stocks
-  if (stocks && stocks.length > 0) {
-    return (
-      <div className="flex flex-col gap-0.5">
-        {stocks.map((s, i) => (
-          <StockDepBadge key={s.deposito_id} nombre={s.nombre} cajas={s.cajas} blisters={s.blisters} idx={i} />
-        ))}
-      </div>
-    )
+  const stocks = row.stocks ?? []
+  if (stocks.length === 0) {
+    return <span className="text-xs text-gray-400">Sin stock</span>
   }
-  // Fallback a A/B (por si un producto aún no tiene filas por depósito)
   return (
     <div className="flex flex-col gap-0.5">
-      <StockDepBadge nombre="Sanalle" cajas={row.stock_a_cajas} blisters={row.stock_a_blisters} idx={0} />
-      <StockDepBadge nombre="Farmacare" cajas={row.stock_b_cajas} blisters={row.stock_b_blisters} idx={1} />
+      {stocks.map((s, i) => (
+        <StockDepBadge key={s.deposito_id} nombre={s.nombre} cajas={s.cajas} blisters={s.blisters} idx={i} />
+      ))}
     </div>
   )
 }
@@ -76,9 +68,11 @@ export default function AdminProductosPage() {
   // Ajuste manual de stock (+/-, sin venta ni compra): habilitado para admin y
   // super_admin. Otros roles pueden habilitarse con el flag ajuste_stock_manual.
   const canManualAdjust = user?.rol === 'super_admin' || user?.rol === 'admin' || isEnabled('ajuste_stock_manual')
-  const stockOps: Array<'transfer' | 'fraction' | 'manual'> = canManualAdjust
-    ? ['transfer', 'fraction', 'manual']
-    : ['transfer', 'fraction']
+  // Fraccionar dejó de ser una operación: el stock se guarda en blísters y se
+  // re-expresa en cajas + sueltos solo, así que romper una caja no cambia nada.
+  const stockOps: Array<'transfer' | 'manual'> = canManualAdjust
+    ? ['manual', 'transfer']
+    : ['transfer']
   // Estado inicial restaurado de la sesión, para volver donde estabas al navegar.
   const savedState = useMemo(() => {
     if (typeof window === 'undefined') return {} as Record<string, unknown>
@@ -119,11 +113,11 @@ export default function AdminProductosPage() {
   const [listasPublicasOpen, setListasPublicasOpen] = useState(false)
 
   const [stockModal, setStockModal] = useState<Producto | null>(null)
-  const [stockAdjustOp, setStockAdjustOp] = useState<'transfer' | 'fraction' | 'manual'>('transfer')
-  const [stockAdjustPool, setStockAdjustPool] = useState<'a' | 'b'>('a')
-  const [depositos, setDepositos] = useState<{ id: number; nombre: string }[]>([])
+  const [stockAdjustOp, setStockAdjustOp] = useState<'transfer' | 'manual'>('manual')
+  const [depositos, setDepositos] = useState<Deposito[]>([])
+  // Depósito sobre el que opera el ajuste, o el origen de la transferencia.
   const [stockAdjustDepositoId, setStockAdjustDepositoId] = useState<number | null>(null)
-  const [stockAdjustTarget, setStockAdjustTarget] = useState<'a' | 'b'>('b')
+  const [stockAdjustDestinoId, setStockAdjustDestinoId] = useState<number | null>(null)
   const [stockAdjustCajas, setStockAdjustCajas] = useState('')
   const [stockAdjustBlisters, setStockAdjustBlisters] = useState('')
   const [adjusting, setAdjusting] = useState(false)
@@ -150,8 +144,8 @@ export default function AdminProductosPage() {
 
   // Depósitos para el selector del ajuste de stock
   useEffect(() => {
-    api.get('/depositos').then((r) => {
-      const deps = (r.data ?? []) as { id: number; nombre: string }[]
+    api.get<Deposito[]>('/depositos').then((r) => {
+      const deps = (r.data ?? []).filter((d) => d.activo)
       setDepositos(deps)
       setStockAdjustDepositoId((prev) => prev ?? (deps[0]?.id ?? null))
     }).catch(() => {})
@@ -319,9 +313,12 @@ export default function AdminProductosPage() {
 
   const openStockAdjust = (producto: Producto) => {
     setStockModal(producto)
-    setStockAdjustOp('transfer')
-    setStockAdjustPool('a')
-    setStockAdjustTarget('b')
+    setStockAdjustOp(canManualAdjust ? 'manual' : 'transfer')
+    // Arranca en el depósito donde el producto ya tiene stock: es el que casi
+    // siempre se quiere ajustar, y evita cargar sobre uno vacío por descuido.
+    const conStock = producto.stocks?.find((st) => st.cajas > 0 || st.blisters > 0)
+    setStockAdjustDepositoId(conStock?.deposito_id ?? depositos[0]?.id ?? null)
+    setStockAdjustDestinoId(null)
     setStockAdjustCajas('')
     setStockAdjustBlisters('')
   }
@@ -335,13 +332,12 @@ export default function AdminProductosPage() {
     setAdjusting(true)
     try {
       const payload = {
-        tipo_operacion: stockAdjustOp === 'manual' ? 'ADJUST' : stockAdjustOp.toUpperCase(),
-        origen: stockAdjustPool === 'a' ? 'STOCK_A' : 'STOCK_B',
-        destino: stockAdjustOp === 'transfer' ? (stockAdjustTarget === 'a' ? 'STOCK_A' : 'STOCK_B') : null,
-        deposito_id: stockAdjustOp === 'manual' ? stockAdjustDepositoId : null,
+        tipo_operacion: stockAdjustOp === 'manual' ? 'ADJUST' : 'TRANSFER',
+        deposito_id: stockAdjustDepositoId,
+        deposito_destino_id: stockAdjustOp === 'transfer' ? stockAdjustDestinoId : null,
         cantidad_cajas: cajasAdj,
         cantidad_blisters: blistersAdj,
-        observacion: stockAdjustOp === 'manual' ? 'Ajuste manual de stock' : null
+        observacion: stockAdjustOp === 'manual' ? 'Ajuste manual de stock' : 'Transferencia entre depósitos',
       }
 
       await api.post(`/productos/${stockModal.id}/operacion-stock`, payload)
@@ -593,7 +589,7 @@ export default function AdminProductosPage() {
       ),
     },
     {
-      key: 'stock_a_cajas',
+      key: 'stock_total_cajas',
       label: 'Stock',
       sortable: true,
       width: '130px',
@@ -965,7 +961,7 @@ export default function AdminProductosPage() {
                     : 'text-gray-400 hover:text-gray-600'
                     }`}
                 >
-                  {op === 'transfer' ? 'Transferir' : op === 'fraction' ? 'Fraccionar' : 'Ajuste'}
+                  {op === 'transfer' ? 'Transferir' : 'Ajuste'}
                 </button>
               ))}
             </div>
@@ -980,132 +976,81 @@ export default function AdminProductosPage() {
                 </div>
               </div>
 
+              {/* Stock actual por depósito: el contexto de cualquier operación. */}
+              <div className="grid grid-cols-2 gap-2">
+                {depositos.map((dep) => {
+                  const st = stockModal.stocks?.find((x) => x.deposito_id === dep.id)
+                  const sel = stockAdjustDepositoId === dep.id
+                  return (
+                    <button
+                      key={dep.id}
+                      onClick={() => setStockAdjustDepositoId(dep.id)}
+                      className={`p-3 rounded-xl border-2 text-left transition-all ${sel ? 'border-[#00AEEF] bg-[#00AEEF]/5' : 'border-gray-100 bg-white hover:border-gray-200'}`}
+                    >
+                      <p className="text-[10px] font-black uppercase text-gray-400 truncate">{dep.nombre}</p>
+                      <p className="text-xs font-bold">{st?.cajas ?? 0} cj + {st?.blisters ?? 0} bl</p>
+                      {(st?.reservado_cajas || st?.reservado_blisters) ? (
+                        <p className="text-[10px] text-amber-600 mt-0.5">
+                          {st.reservado_cajas} cj + {st.reservado_blisters} bl reservados
+                        </p>
+                      ) : null}
+                    </button>
+                  )
+                })}
+              </div>
+
               {stockAdjustOp === 'transfer' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-7 gap-2 items-center">
-                    <div className="col-span-3">
-                      <label className="block text-[10px] uppercase font-bold text-gray-400 mb-1">Origen</label>
-                      <select
-                        value={stockAdjustPool}
-                        onChange={(e) => {
-                          const val = e.target.value as 'a' | 'b'
-                          setStockAdjustPool(val)
-                          setStockAdjustTarget(val === 'a' ? 'b' : 'a')
-                        }}
-                        className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold"
-                      >
-                        <option value="a">Stock A (Sanalle)</option>
-                        <option value="b">Stock B (Farmacare)</option>
-                      </select>
-                    </div>
-                    <div className="col-span-1 flex justify-center pt-5">
-                      <ArrowUpDown className="w-4 h-4 text-gray-300 rotate-90" />
-                    </div>
-                    <div className="col-span-3">
-                      <label className="block text-[10px] uppercase font-bold text-gray-400 mb-1">Destino</label>
-                      <div className="w-full p-2 bg-blue-50 border border-blue-100 rounded-lg text-xs font-bold text-[#003087]">
-                        {stockAdjustTarget === 'a' ? 'Stock A (Sanalle)' : 'Stock B (Farmacare)'}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Cajas a Mover</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={stockAdjustCajas}
-                        onChange={(e) => setStockAdjustCajas(e.target.value)}
-                        placeholder="0"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-center font-bold"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Blisters a Mover</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={stockAdjustBlisters}
-                        onChange={(e) => setStockAdjustBlisters(e.target.value)}
-                        placeholder="0"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-center font-bold"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {stockAdjustOp === 'fraction' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-gray-400 mb-2">Seleccionar Stock para Fraccionar</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {(['a', 'b'] as const).map(pool => (
-                        <button
-                          key={pool}
-                          onClick={() => setStockAdjustPool(pool)}
-                          className={`p-3 rounded-xl border-2 text-left transition-all ${stockAdjustPool === pool ? 'border-[#003087] bg-blue-50' : 'border-gray-100 bg-white'
-                            }`}
-                        >
-                          <p className="text-[10px] font-black uppercase text-gray-400">Stock {pool.toUpperCase()}</p>
-                          <p className="text-xs font-bold">{pool === 'a' ? stockModal.stock_a_cajas : stockModal.stock_b_cajas} cj disponibles</p>
-                        </button>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-gray-400 mb-1">Mover hacia</label>
+                  <select
+                    value={stockAdjustDestinoId ?? ''}
+                    onChange={(e) => setStockAdjustDestinoId(e.target.value ? Number(e.target.value) : null)}
+                    className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold"
+                  >
+                    <option value="">Elegí el depósito destino</option>
+                    {depositos
+                      .filter((d) => d.id !== stockAdjustDepositoId)
+                      .map((d) => (
+                        <option key={d.id} value={d.id}>{d.nombre}</option>
                       ))}
-                    </div>
-                  </div>
-
-                  <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-center">
-                    <p className="text-xs text-amber-800 font-medium">Esta acción restará <span className="font-bold">1 caja</span> y sumará <span className="font-bold text-lg">{stockModal.blisters_por_caja || 0} blisters</span> al Stock {stockAdjustPool.toUpperCase()}</p>
-                  </div>
+                  </select>
                 </div>
               )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Cajas {stockAdjustOp === 'manual' ? '(+/-)' : 'a mover'}
+                  </label>
+                  <input
+                    type="number"
+                    min={stockAdjustOp === 'manual' ? undefined : 0}
+                    value={stockAdjustCajas}
+                    onChange={(e) => setStockAdjustCajas(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-center font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Blisters {stockAdjustOp === 'manual' ? '(+/-)' : 'a mover'}
+                  </label>
+                  <input
+                    type="number"
+                    min={stockAdjustOp === 'manual' ? undefined : 0}
+                    value={stockAdjustBlisters}
+                    onChange={(e) => setStockAdjustBlisters(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-center font-bold"
+                  />
+                </div>
+              </div>
 
               {stockAdjustOp === 'manual' && (
-                <div className="space-y-4">
-                  <p className="text-[10px] font-black uppercase text-gray-400">Depósito a ajustar</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {depositos.map((dep) => {
-                      const st = (stockModal as Producto & { stocks?: StockDep[] }).stocks?.find((s) => s.deposito_id === dep.id)
-                      const cajas = st?.cajas ?? 0
-                      const blisters = st?.blisters ?? 0
-                      return (
-                        <button
-                          key={dep.id}
-                          onClick={() => setStockAdjustDepositoId(dep.id)}
-                          className={`p-3 rounded-xl border-2 text-left transition-all ${stockAdjustDepositoId === dep.id ? 'border-red-400 bg-red-50' : 'border-gray-100 bg-white'
-                            }`}
-                        >
-                          <p className="text-[10px] font-black uppercase text-gray-400 truncate">{dep.nombre}</p>
-                          <p className="text-xs font-bold">{cajas} cj + {blisters} bl</p>
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Ajuste Cajas (+/-)</label>
-                      <input
-                        type="number"
-                        value={stockAdjustCajas}
-                        onChange={(e) => setStockAdjustCajas(e.target.value)}
-                        placeholder="0"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-center font-bold"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Ajuste Blisters (+/-)</label>
-                      <input
-                        type="number"
-                        value={stockAdjustBlisters}
-                        onChange={(e) => setStockAdjustBlisters(e.target.value)}
-                        placeholder="0"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-center font-bold"
-                      />
-                    </div>
-                  </div>
-                  <p className="text-[10px] text-red-500 italic text-center">Precaución: El ajuste manual solo debe usarse para correcciones de inventario físico.</p>
-                </div>
+                <p className="text-[10px] text-red-500 italic text-center">
+                  Precaución: el ajuste manual solo debe usarse para correcciones de inventario físico.
+                  Usá números negativos para descontar.
+                </p>
               )}
 
               <div className="flex justify-end gap-3 pt-2">
@@ -1119,11 +1064,16 @@ export default function AdminProductosPage() {
                 <button
                   type="button"
                   onClick={handleStockAdjust}
-                  disabled={adjusting || (stockAdjustOp === 'manual' && (!stockAdjustDepositoId || (!stockAdjustCajas && !stockAdjustBlisters))) || (stockAdjustOp === 'transfer' && !stockAdjustCajas && !stockAdjustBlisters) || (stockAdjustOp === 'fraction' && (stockAdjustPool === 'a' ? stockModal.stock_a_cajas : stockModal.stock_b_cajas) <= 0)}
+                  disabled={
+                    adjusting ||
+                    !stockAdjustDepositoId ||
+                    (!stockAdjustCajas && !stockAdjustBlisters) ||
+                    (stockAdjustOp === 'transfer' && !stockAdjustDestinoId)
+                  }
                   className="inline-flex items-center gap-2 px-6 py-2 text-sm font-bold text-white bg-[#00AEEF] rounded-xl hover:bg-[#0098d4] shadow-lg shadow-[#00AEEF]/20 transition-all active:scale-95 disabled:opacity-50"
                 >
                   {adjusting && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {stockAdjustOp === 'transfer' ? 'Confirmar Transferencia' : stockAdjustOp === 'fraction' ? 'Fraccionar Caja' : 'Aplicar Ajuste'}
+                  {stockAdjustOp === 'transfer' ? 'Confirmar Transferencia' : 'Aplicar Ajuste'}
                 </button>
               </div>
             </div>
