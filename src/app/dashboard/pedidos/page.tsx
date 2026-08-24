@@ -153,6 +153,9 @@ function PedidoAccionesMenu({
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
 
   const noFinalizado = pedido.shipping_status !== 'entregado' && pedido.shipping_status !== 'cancelado'
+  // Editar solo en pendiente: después el pedido ya está en manos de depósito.
+  // Para corregirlo hay que pedirle a depósito que lo devuelva a pendiente.
+  const puedeEditar = pedido.shipping_status === 'pendiente'
   const puedeEliminar = pedido.shipping_status === 'pendiente' || pedido.shipping_status === 'en_preparacion'
   // El backend sólo permite registrar el pago a admin/super_admin o al vendedor
   // dueño del pedido (POST /pagos/pedido/{id}) — el botón debe reflejar esa regla.
@@ -208,7 +211,7 @@ function PedidoAccionesMenu({
           style={{ position: 'fixed', top: pos.top, left: Math.max(8, pos.left) }}
           className="w-52 bg-white border border-gray-200 rounded-lg shadow-xl z-[9999] py-1 overflow-hidden"
         >
-          {noFinalizado && (
+          {puedeEditar && (
             <button type="button" onClick={() => { onEdit(); setOpen(false) }} className={itemClass}>
               <Edit className="w-4 h-4 text-amber-600" />
               Editar pedido
@@ -533,6 +536,8 @@ export default function PedidosPage() {
   }
 
   const isAdmin = user?.rol === 'admin' || user?.rol === 'super_admin'
+  // Depósito reabre pedidos como parte de su trabajo; admin queda de respaldo.
+  const puedeReabrir = isAdmin || user?.rol === 'operaciones'
 
   const columns = useMemo(() => [
     {
@@ -1261,9 +1266,13 @@ export default function PedidosPage() {
                   <option value={selectedPedido.shipping_status}>
                     {SHIPPING_LABEL[selectedPedido.shipping_status] || selectedPedido.shipping_status} (sin cambio)
                   </option>
-                  {(transiciones.shipping[selectedPedido.shipping_status] || []).map((s) => (
-                    <option key={s} value={s}>{SHIPPING_LABEL[s] || s}</option>
-                  ))}
+                  {(transiciones.shipping[selectedPedido.shipping_status] || [])
+                    // Devolver a "pendiente" reabre el pedido para editarlo: solo
+                    // depósito y admin pueden, así que a ventas ni se le ofrece.
+                    .filter((s) => s !== 'pendiente' || puedeReabrir)
+                    .map((s) => (
+                      <option key={s} value={s}>{SHIPPING_LABEL[s] || s}</option>
+                    ))}
                 </select>
               </div>
 

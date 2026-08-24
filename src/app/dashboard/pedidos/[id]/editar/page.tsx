@@ -8,6 +8,15 @@ import api from '@/lib/api'
 import { Pedido } from '@/types'
 import PedidoForm from '@/components/pedidos/PedidoForm'
 
+const ESTADO_LABEL: Record<string, string> = {
+  pendiente: 'Pendiente',
+  en_preparacion: 'En preparación',
+  listo_para_despacho: 'Listo para despacho',
+  en_camino: 'En camino',
+  entregado: 'Entregado',
+  cancelado: 'Cancelado',
+}
+
 export default function EditarPedidoPage() {
   const router = useRouter()
   const params = useParams()
@@ -21,8 +30,14 @@ export default function EditarPedidoPage() {
       try {
         const res = await api.get(`/pedidos/${pedidoId}`)
         const data = res.data
-        if (data.shipping_status === 'entregado' || data.shipping_status === 'cancelado') {
-          toast.error('No se pueden editar pedidos en estado "Entregado" o "Cancelado"')
+        // Un pedido se edita solo en "pendiente". Después ya está en manos de
+        // depósito y cambiarlo desincronizaría lo que se arma de lo que se factura.
+        if (data.shipping_status !== 'pendiente') {
+          toast.error(
+            `El pedido está en "${ESTADO_LABEL[data.shipping_status] ?? data.shipping_status}" y no se puede editar. ` +
+            'Pedile a depósito que lo devuelva a "Pendiente".',
+            { duration: 6000 },
+          )
           router.push('/dashboard/pedidos')
           return
         }

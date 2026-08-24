@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { ClipboardCheck, Search, RefreshCw, PackageCheck, Loader2, CalendarClock, Package } from 'lucide-react'
+import { ClipboardCheck, Search, RefreshCw, PackageCheck, Loader2, CalendarClock, Package, Undo2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
@@ -33,6 +33,10 @@ export default function PreparacionPage() {
   const [data, setData] = useState<PreparacionPedido[]>([])
   const [loading, setLoading] = useState(true)
   const [marcando, setMarcando] = useState<number | null>(null)
+  const [devolviendo, setDevolviendo] = useState<number | null>(null)
+  // Confirmación en dos pasos: devolver a pendiente libera el pedido para que
+  // ventas lo cambie, así que no conviene que salga de un clic accidental.
+  const [confirmarDevolver, setConfirmarDevolver] = useState<number | null>(null)
 
   const fetchPreparacion = useCallback(async () => {
     setLoading(true)
@@ -52,6 +56,23 @@ export default function PreparacionPage() {
     const t = setTimeout(fetchPreparacion, 250)
     return () => clearTimeout(t)
   }, [fetchPreparacion])
+
+  // Devolver a "pendiente" es lo único que vuelve editable un pedido: ventas no
+  // puede hacerlo por su cuenta una vez que el pedido entró a preparación.
+  const devolverAPendiente = useCallback(async (pedido: PreparacionPedido) => {
+    setDevolviendo(pedido.id)
+    try {
+      await api.patch(`/pedidos/${pedido.id}/shipping-status`, { shipping_status: 'pendiente' })
+      toast.success(`Pedido ${pedido.numero_pedido} devuelto a pendiente: ya se puede editar`)
+      // Sale de la cola de armado hasta que lo vuelvan a poner en preparación.
+      setData((prev) => prev.filter((p) => p.id !== pedido.id))
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'No se pudo devolver el pedido a pendiente')
+    } finally {
+      setDevolviendo(null)
+      setConfirmarDevolver(null)
+    }
+  }, [])
 
   const marcarListo = useCallback(async (pedido: PreparacionPedido) => {
     setMarcando(pedido.id)
@@ -163,16 +184,54 @@ export default function PreparacionPage() {
                 )}
               </div>
 
-              <div className="p-4 pt-0">
+              <div className="p-4 pt-0 space-y-2">
                 <button
                   type="button"
                   onClick={() => marcarListo(pedido)}
-                  disabled={marcando === pedido.id}
+                  disabled={marcando === pedido.id || devolviendo === pedido.id}
                   className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-[#003087] rounded-xl hover:bg-[#002570] transition-colors active:scale-[0.99] disabled:opacity-50"
                 >
                   {marcando === pedido.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <PackageCheck className="w-4 h-4" />}
                   Listo para despacho
                 </button>
+
+                {confirmarDevolver === pedido.id ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+                    <p className="text-xs text-amber-800">
+                      El pedido vuelve a <span className="font-bold">Pendiente</span> y sale de esta cola.
+                      Ventas va a poder modificarlo.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmarDevolver(null)}
+                        className="flex-1 px-3 py-1.5 text-xs font-bold text-gray-600 hover:bg-white rounded-lg transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => devolverAPendiente(pedido)}
+                        disabled={devolviendo === pedido.id}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50"
+                      >
+                        {devolviendo === pedido.id && <Loader2 className="w-3 h-3 animate-spin" />}
+                        Confirmar
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmarDevolver(pedido.id)}
+                    disabled={marcando === pedido.id}
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl hover:bg-amber-100 transition-colors disabled:opacity-50"
+                    title="El pedido vuelve a Pendiente para que ventas lo pueda corregir"
+                  >
+                    <Undo2 className="w-4 h-4" />
+                    Devolver a pendiente para editar
+                  </button>
+                )}
               </div>
             </div>
           ))}
