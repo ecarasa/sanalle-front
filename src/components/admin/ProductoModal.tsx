@@ -88,6 +88,10 @@ interface Props {
 
 export default function ProductoModal({ open, editingProducto, proveedores, laboratorios, loadingOptions, onClose, onSaved, initialProveedorId }: Props) {
   const [form, setForm] = useState<ProductoForm>(emptyForm)
+  // Un producto fraccionable se puede vender por blíster, así que en uno nuevo
+  // el check se tilda solo al cargar los blísters por caja. Se deja de sugerir
+  // apenas el usuario lo toca a mano: su decisión manda sobre la automática.
+  const [blisterElegidoAMano, setBlisterElegidoAMano] = useState(false)
   const [saving, setSaving] = useState(false)
   const [fetchingPvp, setFetchingPvp] = useState(false)
   const [pvpOptions, setPvpOptions] = useState<{ descripcion: string; pvp: string }[] | null>(null)
@@ -142,6 +146,7 @@ export default function ProductoModal({ open, editingProducto, proveedores, labo
   useEffect(() => {
     if (!open) return
     setPvpOptions(null)
+    setBlisterElegidoAMano(false)
     if (editingProducto) {
       setForm({
         codigo: editingProducto.codigo,
@@ -519,7 +524,18 @@ export default function ProductoModal({ open, editingProducto, proveedores, labo
                 <input
                   type="number"
                   value={form.blisters_por_caja}
-                  onChange={(e) => setForm({ ...form, blisters_por_caja: e.target.value })}
+                  onChange={(e) => {
+                    const valor = e.target.value
+                    const fraccionable = (parseInt(valor) || 0) > 1
+                    // Solo en alta y mientras no lo hayan tocado: en una edición
+                    // no se pisa lo que el producto ya tenía definido.
+                    const sugerir = !editingProducto && !blisterElegidoAMano
+                    setForm((prev) => ({
+                      ...prev,
+                      blisters_por_caja: valor,
+                      vende_blister: sugerir ? fraccionable : prev.vende_blister,
+                    }))
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
                 />
               </div>
@@ -542,7 +558,10 @@ export default function ProductoModal({ open, editingProducto, proveedores, labo
                   <input
                     type="checkbox"
                     checked={form.vende_blister}
-                    onChange={(e) => setForm({ ...form, vende_blister: e.target.checked })}
+                    onChange={(e) => {
+                      setBlisterElegidoAMano(true)
+                      setForm({ ...form, vende_blister: e.target.checked })
+                    }}
                     className="w-4 h-4 text-[#003087] border-gray-300 rounded focus:ring-[#003087]/20"
                   />
                   Blíster
