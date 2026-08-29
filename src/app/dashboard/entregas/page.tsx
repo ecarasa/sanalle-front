@@ -290,6 +290,12 @@ export default function EntregasPage() {
     try {
       await api.patch(`/pedidos/${pedidoId}/shipping-status`, { shipping_status: newStatus })
       toast.success('Estado actualizado')
+      // Seguir al pedido a su nueva solapa. Si no, al tocar "Iniciar" el pedido
+      // sale de la solapa actual y la pantalla queda vacía sin explicar a dónde
+      // se fue, que desde el celular es peor todavía.
+      if (visibleTabs.some((t) => t.value === newStatus)) {
+        setShippingFilter(newStatus as ShippingFilter)
+      }
       fetchEntregas()
     } catch {
       toast.error('Error al actualizar estado')
@@ -338,8 +344,8 @@ export default function EntregasPage() {
 
         {/* Navegación por día (compartida lista/mapa) */}
         <div className={`flex items-center gap-1.5 rounded-xl border px-2 py-1.5 shadow-sm transition-opacity ${sinFecha ? 'opacity-40 pointer-events-none' : ''} ${esHoy ? 'bg-[#003087]/5 border-[#003087]/20' : esFuturo ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200'}`}>
-          <button onClick={() => moverDia(-1)} className="p-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 transition-colors" title="Día anterior">
-            <ChevronLeft size={16} />
+          <button onClick={() => moverDia(-1)} className="inline-flex items-center justify-center h-10 w-10 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 transition-colors" title="Día anterior">
+            <ChevronLeft size={18} />
           </button>
           <div className="text-center min-w-[170px]">
             <div className="flex items-center justify-center gap-1.5">
@@ -355,8 +361,8 @@ export default function EntregasPage() {
               className="text-[11px] text-gray-500 bg-transparent text-center focus:outline-none cursor-pointer"
             />
           </div>
-          <button onClick={() => moverDia(1)} className="p-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 transition-colors" title="Día siguiente">
-            <ChevronRight size={16} />
+          <button onClick={() => moverDia(1)} className="inline-flex items-center justify-center h-10 w-10 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 transition-colors" title="Día siguiente">
+            <ChevronRight size={18} />
           </button>
           {!esHoy && (
             <button onClick={() => setFechaSel(hoyStr)} className="px-2.5 py-1.5 text-xs font-semibold text-[#003087] bg-[#003087]/10 rounded-lg hover:bg-[#003087]/20 transition-colors">
@@ -474,13 +480,13 @@ export default function EntregasPage() {
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-3 pt-1">
-              <div className="relative">
+              <div className="relative w-full sm:w-auto">
                 <input
                   type="text"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   placeholder="Buscar por nº pedido o cliente..."
-                  className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] w-72"
+                  className="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] w-full sm:w-72"
                 />
               </div>
               {zonas.length > 0 && (
@@ -488,7 +494,7 @@ export default function EntregasPage() {
                   <span className="text-xs text-gray-500 font-medium">Zona:</span>
                   <button
                     onClick={() => setZonaFiltro(null)}
-                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${zonaFiltro === null ? 'bg-[#00AEEF] text-white border-[#00AEEF]' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                    className={`px-3 py-2 rounded-full text-xs font-medium border transition-colors ${zonaFiltro === null ? 'bg-[#00AEEF] text-white border-[#00AEEF]' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
                   >
                     Todas
                   </button>
@@ -496,7 +502,7 @@ export default function EntregasPage() {
                     <button
                       key={zona}
                       onClick={() => setZonaFiltro(zona)}
-                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${zonaFiltro === zona ? 'bg-[#00AEEF] text-white border-[#00AEEF]' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                      className={`px-3 py-2 rounded-full text-xs font-medium border transition-colors ${zonaFiltro === zona ? 'bg-[#00AEEF] text-white border-[#00AEEF]' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
                     >
                       {zona}
                     </button>
@@ -505,9 +511,9 @@ export default function EntregasPage() {
               )}
               {clientesAgrupados.length > 0 && (
                 <div className="ml-auto flex items-center gap-2 text-xs">
-                  <button onClick={expandirTodos} className="text-[#003087] font-medium hover:underline">Expandir todo</button>
+                  <button onClick={expandirTodos} className="px-2 py-2 text-[#003087] font-medium hover:underline">Expandir todo</button>
                   <span className="text-gray-300">·</span>
-                  <button onClick={colapsarTodos} className="text-gray-500 font-medium hover:underline">Colapsar</button>
+                  <button onClick={colapsarTodos} className="px-2 py-2 text-gray-500 font-medium hover:underline">Colapsar</button>
                 </div>
               )}
             </div>
@@ -602,103 +608,117 @@ export default function EntregasPage() {
                     {expandido && (
                       <div className="border-t divide-y bg-gray-50/50">
                         {pedidos.map((row) => (
-                          <div key={row.id} className="flex items-center gap-3 px-4 py-2.5 flex-wrap">
-                            <span className="font-semibold text-sm text-gray-800 w-24">{row.numero_pedido}</span>
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${SHIPPING_BADGE[row.shipping_status] || 'bg-gray-100'}`}>
-                              {SHIPPING_LABEL[row.shipping_status] || row.shipping_status}
-                            </span>
-                            {esFuturo ? (
-                              row.bultos > 0 && (
-                                <span className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-full">
-                                  {row.bultos} bultos
-                                </span>
-                              )
-                            ) : (
-                              <label className="inline-flex items-center gap-1 text-xs text-gray-500">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  defaultValue={row.bultos}
-                                  onBlur={(e) => {
-                                    const valor = parseInt(e.target.value, 10) || 0
-                                    if (valor !== row.bultos) handleLogistica(row.id, { bultos: valor })
-                                  }}
-                                  className="w-14 px-1.5 py-0.5 text-xs text-right border border-gray-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#003087]/30"
-                                  title="Bultos"
-                                />
-                                bultos
-                              </label>
-                            )}
-                            {!esFuturo && (
-                              <label className="inline-flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={row.despachado}
-                                  onChange={(e) => handleLogistica(row.id, { despachado: e.target.checked })}
-                                  className="w-3.5 h-3.5 text-[#003087] border-gray-300 rounded focus:ring-[#003087]/20"
-                                />
-                                Despachado
-                              </label>
-                            )}
+                          <div key={row.id} className="px-4 py-3 space-y-2">
+                            {/* Datos del pedido */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-sm text-gray-800">{row.numero_pedido}</span>
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${SHIPPING_BADGE[row.shipping_status] || 'bg-gray-100'}`}>
+                                {SHIPPING_LABEL[row.shipping_status] || row.shipping_status}
+                              </span>
+                              <span className="text-xs text-gray-500">Entrega: {row.fecha_entrega}</span>
+                              <span className={`ml-auto text-sm font-bold ${row.saldo_pendiente > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                {formatCurrency(row.saldo_pendiente)}
+                              </span>
+                            </div>
 
-                            <span className={`text-sm font-bold ${row.saldo_pendiente > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                              {formatCurrency(row.saldo_pendiente)}
-                            </span>
-                            <div className="flex items-center gap-1.5 ml-auto flex-wrap">
-                              <span className='text-xs text-gray-500 mx-2'>Entrega: {row.fecha_entrega}</span>
-                              <button
-                                onClick={() => { setSelectedPedido(row); setShowDetailModal(true) }}
-                                className="p-1.5 text-gray-600 bg-white border rounded hover:bg-gray-100 transition-colors"
-                                title="Ver Detalle"
-                              >
-                                <Eye size={14} />
-                              </button>
+                            {/* Acciones. Los botones tienen 40px de alto porque esta
+                                pantalla se usa desde el celular en la calle. */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {esFuturo ? (
+                                row.bultos > 0 && (
+                                  <span className="text-xs text-gray-500 font-medium bg-gray-100 px-2.5 py-2 rounded-lg">
+                                    {row.bultos} bultos
+                                  </span>
+                                )
+                              ) : (
+                                <label className="inline-flex items-center gap-1.5 h-10 px-2.5 text-xs text-gray-600 bg-white border border-gray-200 rounded-lg">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    defaultValue={row.bultos}
+                                    onBlur={(e) => {
+                                      const valor = parseInt(e.target.value, 10) || 0
+                                      if (valor !== row.bultos) handleLogistica(row.id, { bultos: valor })
+                                    }}
+                                    className="w-12 px-1 py-1 text-sm text-right border border-gray-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#003087]/30"
+                                    title="Bultos"
+                                  />
+                                  bultos
+                                </label>
+                              )}
+
                               {!esFuturo && (
-                                <button
-                                  onClick={() => setEditUbicacionPedido(row)}
-                                  className="p-1.5 text-[#00AEEF] bg-white border rounded hover:bg-[#00AEEF]/10 transition-colors"
-                                  title="Cambiar punto de entrega"
+                                <label
+                                  className={`inline-flex items-center gap-2 h-10 px-3 text-sm font-medium rounded-lg border cursor-pointer select-none transition-colors ${row.despachado
+                                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                                    : 'bg-white border-gray-200 text-gray-600'}`}
                                 >
-                                  <MapPin size={14} />
-                                </button>
+                                  <input
+                                    type="checkbox"
+                                    checked={row.despachado}
+                                    onChange={(e) => handleLogistica(row.id, { despachado: e.target.checked })}
+                                    className="w-5 h-5 text-[#003087] border-gray-300 rounded focus:ring-[#003087]/20"
+                                  />
+                                  Despachado
+                                </label>
                               )}
-                              {isAdmin && !esFuturo && (
-                                <button
-                                  onClick={() => { setAssignPedidoId(row.id); setShowAssignModal(true) }}
-                                  className="p-1.5 text-[#003087] bg-white border rounded hover:bg-[#003087]/10 transition-colors"
-                                  title="Asignar Repartidor"
-                                >
-                                  <UserPlus size={14} />
-                                </button>
-                              )}
-                              <button
-                                onClick={() => handleViewPdf(row.id)}
-                                className="p-1.5 text-red-600 bg-white border rounded hover:bg-red-50 transition-colors"
-                                title="Ver Remito"
-                              >
-                                <FileText size={14} />
-                              </button>
+
                               {!esFuturo && row.shipping_status === 'listo_para_despacho' && (
                                 <button
                                   onClick={() => handleStatusChange(row.id, 'en_camino')}
-                                  className="px-2.5 py-1.5 bg-[#003087] text-white text-xs font-medium rounded hover:bg-[#002570] transition-colors flex items-center gap-1"
+                                  className="inline-flex items-center gap-1.5 h-10 px-4 bg-[#003087] text-white text-sm font-semibold rounded-lg hover:bg-[#002570] transition-colors"
                                 >
-                                  <Truck size={13} /> Iniciar
+                                  <Truck size={16} /> Iniciar
                                 </button>
                               )}
                               {!esFuturo && row.shipping_status === 'en_camino' && (
                                 <button
                                   onClick={() => handleStatusChange(row.id, 'entregado')}
-                                  className="px-2.5 py-1.5 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 transition-colors flex items-center gap-1"
+                                  className="inline-flex items-center gap-1.5 h-10 px-4 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors"
                                 >
-                                  <Truck size={13} /> Entregar
+                                  <Truck size={16} /> Entregar
                                 </button>
                               )}
-                              {esFuturo && (
-                                <span className="text-[10px] font-medium text-amber-600 flex items-center gap-1">
-                                  <Lock size={11} /> solo lectura
-                                </span>
-                              )}
+
+                              <div className="flex items-center gap-1.5 ml-auto">
+                                <button
+                                  onClick={() => { setSelectedPedido(row); setShowDetailModal(true) }}
+                                  className="inline-flex items-center justify-center h-10 w-10 text-gray-600 bg-white border rounded-lg hover:bg-gray-100 transition-colors"
+                                  title="Ver Detalle"
+                                >
+                                  <Eye size={16} />
+                                </button>
+                                {!esFuturo && (
+                                  <button
+                                    onClick={() => setEditUbicacionPedido(row)}
+                                    className="inline-flex items-center justify-center h-10 w-10 text-[#00AEEF] bg-white border rounded-lg hover:bg-[#00AEEF]/10 transition-colors"
+                                    title="Cambiar punto de entrega"
+                                  >
+                                    <MapPin size={16} />
+                                  </button>
+                                )}
+                                {isAdmin && !esFuturo && (
+                                  <button
+                                    onClick={() => { setAssignPedidoId(row.id); setShowAssignModal(true) }}
+                                    className="inline-flex items-center justify-center h-10 w-10 text-[#003087] bg-white border rounded-lg hover:bg-[#003087]/10 transition-colors"
+                                    title="Asignar Repartidor"
+                                  >
+                                    <UserPlus size={16} />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleViewPdf(row.id)}
+                                  className="inline-flex items-center justify-center h-10 w-10 text-red-600 bg-white border rounded-lg hover:bg-red-50 transition-colors"
+                                  title="Ver Remito"
+                                >
+                                  <FileText size={16} />
+                                </button>
+                                {esFuturo && (
+                                  <span className="text-[10px] font-medium text-amber-600 inline-flex items-center gap-1">
+                                    <Lock size={11} /> solo lectura
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
