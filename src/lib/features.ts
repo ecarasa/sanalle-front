@@ -25,6 +25,7 @@ export const FEATURES: FeatureDef[] = [
   // Operaciones
   { key: 'clientes', label: 'Clientes', grupo: 'Operaciones', href: '/dashboard/clientes' },
   { key: 'pedidos', label: 'Pedidos', grupo: 'Operaciones', href: '/dashboard/pedidos' },
+  { key: 'cotizaciones', label: 'Cotizaciones (pedidos en borrador)', grupo: 'Operaciones', href: '/dashboard/cotizaciones' },
   { key: 'entregas', label: 'Entregas', grupo: 'Operaciones', href: '/dashboard/entregas' },
   { key: 'pagos', label: 'Pagos', grupo: 'Operaciones', href: '/dashboard/pagos' },
   { key: 'compras', label: 'Compras (ingresos de mercadería)', grupo: 'Operaciones', href: '/dashboard/admin/ingresos-mercaderia' },

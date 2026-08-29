@@ -10,7 +10,7 @@ import {
   Truck as TruckIcon, SlidersHorizontal, Building2, FlaskConical, Settings,
   ShoppingCart, Warehouse, Rocket, MessageSquare, ArrowLeftRight, ClipboardList,
   Store, PackagePlus, FileText, Wallet, Table2, Banknote, HandCoins,
-  ClipboardCheck, TrendingUp, LayoutDashboard, Percent,
+  ClipboardCheck, TrendingUp, LayoutDashboard, Percent, FileEdit,
 } from 'lucide-react';
 import { useFeatureFlags } from '@/hooks/useFeatureFlags';
 import { featureKeyForHref } from '@/lib/features';
@@ -100,6 +100,7 @@ export default function Sidebar({ user, onLogout, onChangePassword }: SidebarPro
       {
         label: 'Ventas', items: [
           { label: 'Vender', href: '/dashboard/pedidos/nuevo', icon: ShoppingCart },
+          { label: 'Cotizaciones', href: '/dashboard/cotizaciones', icon: FileEdit },
           { label: 'Pedidos', href: '/dashboard/pedidos', icon: ClipboardList },
           { label: 'Pagos', href: '/dashboard/pagos', icon: Banknote },
           { label: 'Clientes', href: clientesHref, icon: Users },

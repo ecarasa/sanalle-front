@@ -12,7 +12,7 @@ import PedidoForm from '@/components/pedidos/PedidoForm'
 const ESTADOS_EDITABLES = ['borrador', 'pendiente']
 
 const ESTADO_LABEL: Record<string, string> = {
-  borrador: 'Borrador',
+  borrador: 'Cotización',
   pendiente: 'Pendiente',
   en_preparacion: 'En preparación',
   listo_para_despacho: 'Listo para despacho',

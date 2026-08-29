@@ -94,7 +94,7 @@ export default function NuevoPedidoWrapper({ initialClienteId }: NuevoPedidoWrap
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center text-gray-500">
-          Seleccione un cliente para crear el borrador del pedido
+          Seleccione un cliente para crear la cotización
         </div>
       </div>
     )
