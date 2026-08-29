@@ -34,3 +34,31 @@ export function precioBasePorUnidad(
   }
   return precioCaja
 }
+
+/**
+ * Precio unitario y total de una línea, a partir del precio de lista y el
+ * descuento. Es la única cuenta de plata de una línea: la usan tanto el modal
+ * de alta como los inputs de la grilla, para que no puedan desincronizarse.
+ *
+ * `precioUnitario` se pasa cuando el vendedor lo pisó a mano; en ese caso manda
+ * él y el descuento queda como referencia de dónde salió.
+ */
+export function recalcularLinea(l: {
+  precioLista: number | null
+  descuento: number | null
+  precioUnitario?: number | null
+  cantidad: number
+}): { precioUnitario: number; precioTotal: number } {
+  const unitario =
+    l.precioUnitario != null && l.precioUnitario >= 0
+      ? l.precioUnitario
+      : (l.precioLista ?? 0) * (1 - (l.descuento ?? 0) / 100)
+
+  const cantidad = Number.isFinite(l.cantidad) && l.cantidad > 0 ? l.cantidad : 0
+  return { precioUnitario: unitario, precioTotal: unitario * cantidad }
+}
+
+/** Precio unitario que resulta de aplicar un descuento sobre el precio de lista. */
+export function precioConDescuento(precioLista: number, descuento: number): number {
+  return precioLista * (1 - (descuento || 0) / 100)
+}

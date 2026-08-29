@@ -120,6 +120,8 @@ export interface Cliente {
   zona_id?: number;
   zona_nombre?: string;
   condicion_pago: string;
+  /** Último transporte usado con este cliente; se propone al cargar un pedido. */
+  transporte_habitual: string | null;
   plazo_dias: number | null;
   dias_entrega: number | null;
   vendedor_id: number | null;
@@ -133,6 +135,21 @@ export interface Cliente {
   deuda_inicial_factura: number;
   created_at: string;
   updated_at: string;
+}
+
+/** Una dirección de entrega de la libreta del cliente. */
+export interface ClienteDireccion {
+  id: number;
+  cliente_id: number;
+  etiqueta: string;
+  direccion: string;
+  localidad_id: number | null;
+  localidad_nombre: string | null;
+  codigo_postal: string | null;
+  latitud: number | null;
+  longitud: number | null;
+  es_default: boolean;
+  activo: boolean;
 }
 
 export interface ClienteConDeuda extends Cliente {
@@ -272,6 +289,17 @@ export interface BitacoraEntrada {
   created_at: string;
 }
 
+/** Un tramo del plan de cobro de un pedido: forma, cuenta destino e importe.
+ *  Es informativo: no genera Pagos ni mueve la cuenta corriente. */
+export interface PedidoPlanPago {
+  id?: number;
+  forma: string;
+  cuenta_id: number | null;
+  importe: number;
+  cuenta_nombre?: string | null;
+  observacion?: string | null;
+}
+
 export interface Pedido {
   id: number;
   numero_pedido: string;
@@ -280,7 +308,7 @@ export interface Pedido {
   cliente_tipo: string | null;
   vendedor_id: number;
   vendedor_nombre: string | null;
-  shipping_status: 'pendiente' | 'en_preparacion' | 'listo_para_despacho' | 'en_camino' | 'entregado' | 'cancelado';
+  shipping_status: 'borrador' | 'pendiente' | 'en_preparacion' | 'listo_para_despacho' | 'en_camino' | 'entregado' | 'cancelado';
   payment_status: 'pendiente' | 'pagado' | 'cancelado' | 'parcial';
   tipo_precio: Grupo | null;
   semaforo: string | null;
@@ -304,11 +332,15 @@ export interface Pedido {
   cliente_zona?: string | null;
   repartidor_id: number | null;
   repartidor_nombre: string | null;
+  direccion_entrega_id?: number | null;
   direccion_entrega?: string | null;
   latitud?: number | null;
   longitud?: number | null;
   bultos: number;
+  /** False = el pedido no compromete mercadería (se factura antes del ingreso). */
+  reserva_stock: boolean;
   items: PedidoItem[];
+  plan_pago: PedidoPlanPago[];
   created_at: string;
   updated_at: string;
 }

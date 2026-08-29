@@ -1,11 +1,10 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { ClipboardCheck, Search, RefreshCw, PackageCheck, Loader2, CalendarClock, Package, Undo2 } from 'lucide-react'
+import { ClipboardCheck, Search, RefreshCw, PackageCheck, Loader2, CalendarClock, Package, Undo2, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
-import { formatDate } from '@/lib/utils'
 
 interface PreparacionItem {
   producto: string
@@ -23,6 +22,9 @@ interface PreparacionPedido {
   cliente: string
   fecha: string | null
   fecha_entrega: string | null
+  bultos: number
+  /** False = el pedido se cargó sin comprometer mercadería. */
+  reserva_stock: boolean
   observacion: string | null
   items: PreparacionItem[]
 }
@@ -37,6 +39,10 @@ export default function PreparacionPage() {
   // Confirmación en dos pasos: devolver a pendiente libera el pedido para que
   // ventas lo cambie, así que no conviene que salga de un clic accidental.
   const [confirmarDevolver, setConfirmarDevolver] = useState<number | null>(null)
+  // Bultos y fecha de entrega los carga depósito acá, mientras arma. Van por
+  // `PATCH /pedidos/{id}/logistica`, que es el único camino que sigue abierto
+  // con el pedido fuera de `pendiente`.
+  const [guardandoLogistica, setGuardandoLogistica] = useState<number | null>(null)
 
   const fetchPreparacion = useCallback(async () => {
     setLoading(true)
@@ -73,6 +79,23 @@ export default function PreparacionPage() {
       setConfirmarDevolver(null)
     }
   }, [])
+
+  const guardarLogistica = useCallback(
+    async (pedido: PreparacionPedido, cambios: { bultos?: number; fecha_entrega?: string | null }) => {
+      setGuardandoLogistica(pedido.id)
+      try {
+        await api.patch(`/pedidos/${pedido.id}/logistica`, cambios)
+        setData((prev) => prev.map((p) => (p.id === pedido.id ? { ...p, ...cambios } as PreparacionPedido : p)))
+      } catch (err: any) {
+        toast.error(err.response?.data?.detail || 'No se pudo guardar')
+        // El input muestra el valor optimista; se recarga para no dejarlo mintiendo.
+        fetchPreparacion()
+      } finally {
+        setGuardandoLogistica(null)
+      }
+    },
+    [fetchPreparacion]
+  )
 
   const marcarListo = useCallback(async (pedido: PreparacionPedido) => {
     setMarcando(pedido.id)
@@ -147,15 +170,51 @@ export default function PreparacionPage() {
                     <span className="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 font-medium">En preparación</span>
                   </div>
                   <p className="text-sm text-gray-600 mt-0.5">{pedido.cliente}</p>
-                  {pedido.fecha_entrega && (
-                    <p className="text-xs text-gray-400 mt-1 inline-flex items-center gap-1">
-                      <CalendarClock className="w-3.5 h-3.5" /> Entrega: {formatDate(pedido.fecha_entrega)}
+                  {!pedido.reserva_stock && (
+                    <p className="mt-1.5 inline-flex items-start gap-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2 py-1 text-[11px] text-amber-800">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                      Este pedido no descontó stock: la mercadería puede no estar en góndola.
                     </p>
                   )}
                 </div>
                 <span className="text-xs px-2 py-1 rounded-lg bg-gray-50 text-gray-500 font-medium inline-flex items-center gap-1">
                   <Package className="w-3.5 h-3.5" /> {pedido.items.length} ítem{pedido.items.length !== 1 ? 's' : ''}
                 </span>
+              </div>
+
+              {/* Datos de armado: los carga depósito, y de acá los toma Logística */}
+              <div className="grid grid-cols-2 gap-3 px-4 py-3 bg-gray-50/60 border-b border-gray-100">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 font-semibold mb-1">
+                    Bultos
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    defaultValue={pedido.bultos}
+                    disabled={guardandoLogistica === pedido.id}
+                    onBlur={(e) => {
+                      const valor = parseInt(e.target.value, 10) || 0
+                      if (valor !== pedido.bultos) guardarLogistica(pedido, { bultos: valor })
+                    }}
+                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] disabled:bg-gray-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-500 font-semibold mb-1 inline-flex items-center gap-1">
+                    <CalendarClock className="w-3 h-3" /> Fecha de entrega
+                  </label>
+                  <input
+                    type="date"
+                    defaultValue={pedido.fecha_entrega ?? ''}
+                    disabled={guardandoLogistica === pedido.id}
+                    onBlur={(e) => {
+                      const valor = e.target.value || null
+                      if (valor !== pedido.fecha_entrega) guardarLogistica(pedido, { fecha_entrega: valor })
+                    }}
+                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] disabled:bg-gray-100"
+                  />
+                </div>
               </div>
 
               {/* Lista de mercadería (SIN importes) */}

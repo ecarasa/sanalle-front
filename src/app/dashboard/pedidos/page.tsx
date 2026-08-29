@@ -20,11 +20,12 @@ import { Pedido, PaginatedResponse } from '@/types'
 
 type DetailTab = 'detalle' | 'bitacora'
 
-type ShippingFilter = '' | 'pendiente' | 'en_preparacion' | 'listo_para_despacho' | 'en_camino' | 'entregado' | 'cancelado'
+type ShippingFilter = '' | 'borrador' | 'pendiente' | 'en_preparacion' | 'listo_para_despacho' | 'en_camino' | 'entregado' | 'cancelado'
 type PaymentFilter = '' | 'pendiente' | 'pagado' | 'parcial' | 'cancelado'
 
 const SHIPPING_TABS: { label: string; value: ShippingFilter }[] = [
   { label: 'Todos', value: '' },
+  { label: 'Borrador', value: 'borrador' },
   { label: 'Pendiente', value: 'pendiente' },
   { label: 'En Preparación', value: 'en_preparacion' },
   { label: 'Listo Despacho', value: 'listo_para_despacho' },
@@ -69,6 +70,7 @@ function rangoDePeriodo(periodo: string): { desde?: string; hasta?: string } {
 }
 
 const SHIPPING_BADGE: Record<string, string> = {
+  borrador: 'bg-gray-100 text-gray-500 border border-dashed border-gray-300',
   pendiente: 'bg-slate-100 text-slate-700',
   en_preparacion: 'bg-sky-300 text-gray-700',
   listo_para_despacho: 'bg-cyan-100 text-cyan-700',
@@ -78,6 +80,7 @@ const SHIPPING_BADGE: Record<string, string> = {
 }
 
 const SHIPPING_LABEL: Record<string, string> = {
+  borrador: 'Borrador',
   pendiente: 'Pendiente',
   en_preparacion: 'En Preparación',
   listo_para_despacho: 'Listo Despacho',
@@ -153,10 +156,11 @@ function PedidoAccionesMenu({
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
 
   const noFinalizado = pedido.shipping_status !== 'entregado' && pedido.shipping_status !== 'cancelado'
-  // Editar solo en pendiente: después el pedido ya está en manos de depósito.
-  // Para corregirlo hay que pedirle a depósito que lo devuelva a pendiente.
-  const puedeEditar = pedido.shipping_status === 'pendiente'
-  const puedeEliminar = pedido.shipping_status === 'pendiente' || pedido.shipping_status === 'en_preparacion'
+  // Editar mientras el pedido es de ventas: borrador (se está cargando) o
+  // pendiente (finalizado, sin tomar). Después ya está en manos de depósito y
+  // para corregirlo hay que pedirle que lo devuelva a pendiente.
+  const puedeEditar = pedido.shipping_status === 'borrador' || pedido.shipping_status === 'pendiente'
+  const puedeEliminar = puedeEditar || pedido.shipping_status === 'en_preparacion'
   // El backend sólo permite registrar el pago a admin/super_admin o al vendedor
   // dueño del pedido (POST /pagos/pedido/{id}) — el botón debe reflejar esa regla.
   const puedePagar =
@@ -987,6 +991,11 @@ export default function PedidosPage() {
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${SHIPPING_BADGE[p.shipping_status] || ''}`}>
                         {SHIPPING_LABEL[p.shipping_status] || p.shipping_status}
                       </span>
+                      {!p.reserva_stock && (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800" title="Este pedido no comprometió mercadería">
+                          No descuenta stock
+                        </span>
+                      )}
                       {MOSTRAR_ESTADO_PAGO && (
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${PAYMENT_BADGE[p.payment_status] || ''}`}>
                           {PAYMENT_LABEL[p.payment_status] || p.payment_status}
@@ -1082,9 +1091,33 @@ export default function PedidosPage() {
                         {campo('Bultos', p.bultos ? String(p.bultos) : '0', <Package className="w-3.5 h-3.5" />)}
                         {MOSTRAR_ESTADO_PAGO && campo('Compromiso de pago', p.fecha_compromiso_pago ? formatDate(p.fecha_compromiso_pago) : null, <CreditCard className="w-3.5 h-3.5" />)}
                         {campo('Despachado', p.despachado ? 'Sí' : 'No')}
+                        {campo('Descuenta stock', p.reserva_stock
+                          ? 'Sí'
+                          : <span className="text-amber-700 font-medium">No — la mercadería no está comprometida</span>)}
                       </div>
                     </section>
                   </div>
+
+                  {p.plan_pago?.length > 0 && (
+                    <section className="rounded-2xl border border-gray-100 p-4">
+                      <h3 className="text-[11px] uppercase tracking-wide text-gray-400 font-bold mb-2">
+                        Cómo paga
+                      </h3>
+                      <ul className="space-y-1">
+                        {p.plan_pago.map((tramo, i) => (
+                          <li key={i} className="flex items-center justify-between text-sm">
+                            <span className="text-gray-700">
+                              {tramo.forma}
+                              {tramo.cuenta_nombre && (
+                                <span className="text-gray-400"> → {tramo.cuenta_nombre}</span>
+                              )}
+                            </span>
+                            <span className="font-semibold text-gray-900">{formatCurrency(tramo.importe)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
 
                   {p.observacion && (
                     <section className="rounded-2xl border border-gray-100 bg-amber-50/40 p-4">

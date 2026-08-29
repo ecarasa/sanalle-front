@@ -8,7 +8,11 @@ import api from '@/lib/api'
 import { Pedido } from '@/types'
 import PedidoForm from '@/components/pedidos/PedidoForm'
 
+/** Estados en los que el pedido todavía es de ventas y se puede modificar. */
+const ESTADOS_EDITABLES = ['borrador', 'pendiente']
+
 const ESTADO_LABEL: Record<string, string> = {
+  borrador: 'Borrador',
   pendiente: 'Pendiente',
   en_preparacion: 'En preparación',
   listo_para_despacho: 'Listo para despacho',
@@ -30,9 +34,10 @@ export default function EditarPedidoPage() {
       try {
         const res = await api.get(`/pedidos/${pedidoId}`)
         const data = res.data
-        // Un pedido se edita solo en "pendiente". Después ya está en manos de
-        // depósito y cambiarlo desincronizaría lo que se arma de lo que se factura.
-        if (data.shipping_status !== 'pendiente') {
+        // Un pedido se edita mientras es de ventas: borrador o pendiente. Después
+        // ya está en manos de depósito y cambiarlo desincronizaría lo que se arma
+        // de lo que se factura.
+        if (!ESTADOS_EDITABLES.includes(data.shipping_status)) {
           toast.error(
             `El pedido está en "${ESTADO_LABEL[data.shipping_status] ?? data.shipping_status}" y no se puede editar. ` +
             'Pedile a depósito que lo devuelva a "Pendiente".',
@@ -88,6 +93,7 @@ export default function EditarPedidoPage() {
   return (
     <PedidoForm
       pedidoId={pedido.id}
+      clienteId={pedido.cliente_id}
       clienteNombre={pedido.cliente_nombre || 'Cliente Desconocido'}
       clienteTipo={pedido.cliente_tipo || undefined}
       numeroPedido={pedido.numero_pedido}
@@ -100,15 +106,17 @@ export default function EditarPedidoPage() {
       initialObservacion={pedido.observacion || ''}
       initialTransporte={pedido.transporte}
       initialDireccionEntrega={pedido.direccion_entrega}
+      initialDireccionEntregaId={pedido.direccion_entrega_id}
       clienteDomicilio={pedido.cliente_domicilio}
       clienteLocalidad={pedido.cliente_localidad}
       clienteCodigoPostal={pedido.cliente_codigo_postal}
       clienteProvincia={pedido.cliente_provincia}
       initialSociedad={pedido.sociedad}
       initialFechaCompromisoPago={pedido.fecha_compromiso_pago}
-      initialDespachado={pedido.despachado}
       initialTipoPrecio={pedido.tipo_precio}
-      initialBultos={pedido.bultos}
+      initialReservaStock={pedido.reserva_stock}
+      initialPlanPago={pedido.plan_pago}
+      shippingStatus={pedido.shipping_status}
       initialItems={initialItems}
       isEditing={true}
       onCancel={handleCancel}

@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, X, Search, ArrowLeft, Package, Loader2, Save } from 'lucide-react'
+import { Plus, X, Search, ArrowLeft, Package, Loader2, Save, AlertTriangle, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { RadioGroup, Radio, DatePicker, DateInput, DateSegment as DateSegmentInput } from 'react-aria-components'
 import { parseDate, today, getLocalTimeZone, type DateValue } from '@internationalized/date'
 import api from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
-import { Deposito, Producto, User } from '@/types'
+import { ClienteDireccion, Deposito, PedidoPlanPago, Producto, User } from '@/types'
 import { useAuth } from '@/hooks/useAuth'
 import {
   GRUPO_LABEL,
@@ -24,6 +24,8 @@ import {
   UNIDAD_LABEL,
   unidadesDeProducto,
   precioBasePorUnidad,
+  precioConDescuento,
+  recalcularLinea,
   type UnidadVenta,
 } from '@/lib/ventas'
 
@@ -74,8 +76,18 @@ export const precioDeLista = (
   return precios[lista.key] ?? null
 }
 
+/** Cuenta de dinero de la empresa, tal como la devuelve `GET /cuentas`. */
+interface CuentaSimple {
+  id: number
+  nombre: string
+  tipo: string
+  es_default: boolean
+  activo?: boolean
+}
+
 interface PedidoFormProps {
   pedidoId: number
+  clienteId: number
   clienteNombre?: string
   clienteTipo?: string
   clienteCondicionPago?: string | null
@@ -94,16 +106,25 @@ interface PedidoFormProps {
   initialFecha?: string | null
 
   initialTipoDocumento: 'remito' | 'factura'
+  /** Solo lectura: la fecha la confirma depósito desde Preparación. */
   initialFechaEntrega: string | null
   initialObservacion: string
   initialTransporte?: string | null
+  /** Último transporte del cliente: se propone si el pedido no trae uno. */
+  clienteTransporteHabitual?: string | null
   initialDireccionEntrega?: string | null
+  /** Dirección de la libreta del cliente elegida para este pedido. */
+  initialDireccionEntregaId?: number | null
   initialSociedad?: string | null
   initialFechaCompromisoPago?: string | null
-  initialDespachado?: boolean
   initialItems: PedidoItemLocal[]
   initialTipoPrecio?: Grupo | null
-  initialBultos?: number
+  /** Plan de cobro del pedido (informativo: no genera pagos). */
+  initialPlanPago?: PedidoPlanPago[]
+  /** False = el pedido no compromete mercadería (se factura antes del ingreso). */
+  initialReservaStock?: boolean
+  /** Estado del pedido. Solo un borrador se "finaliza"; el resto ya lo está. */
+  shippingStatus?: string
 
   isEditing: boolean
   onCancel: () => void
@@ -111,6 +132,7 @@ interface PedidoFormProps {
 
 export default function PedidoForm({
   pedidoId,
+  clienteId,
   clienteNombre,
   clienteTipo,
   clienteCondicionPago,
@@ -129,13 +151,16 @@ export default function PedidoForm({
   initialFechaEntrega,
   initialObservacion,
   initialTransporte,
+  clienteTransporteHabitual,
   initialDireccionEntrega,
+  initialDireccionEntregaId,
   initialSociedad,
   initialFechaCompromisoPago,
-  initialDespachado,
   initialItems,
   initialTipoPrecio,
-  initialBultos,
+  initialPlanPago,
+  initialReservaStock,
+  shippingStatus,
   isEditing,
   onCancel,
 }: PedidoFormProps) {
@@ -158,17 +183,14 @@ export default function PedidoForm({
 
   // Order fields
   const [tipoDocumento, setTipoDocumento] = useState<'remito' | 'factura'>(initialTipoDocumento)
-  const [fechaEntrega, setFechaEntrega] = useState<DateValue | null>(() => {
-    if (initialFechaEntrega) {
-      try {
-        return parseDate(initialFechaEntrega)
-      } catch (e) {
-        console.error('Error parsing date:', e)
-      }
-    }
-    // Nuevo pedido: por defecto según los días de entrega del cliente (o mañana).
-    return isEditing ? null : entregaDefault
-  })
+  // La fecha de entrega la sugiere el backend al crear el pedido y la confirma
+  // depósito. Acá solo se muestra: en el form de ventas es un dato, no un campo.
+  const fechaEntregaSugerida = useMemo(() => {
+    const iso = initialFechaEntrega ?? (isEditing ? null : entregaDefault.toString())
+    if (!iso) return null
+    const [y, m, d] = iso.split('-')
+    return `${d}/${m}/${y}`
+  }, [initialFechaEntrega, isEditing, entregaDefault])
   // Fecha de creación editable (default: hoy).
   const [fechaCreacionDate, setFechaCreacionDate] = useState<DateValue | null>(() => {
     if (initialFecha) {
@@ -177,7 +199,31 @@ export default function PedidoForm({
     return hoy
   })
   const [observacion, setObservacion] = useState(initialObservacion)
-  const [transporte, setTransporte] = useState(initialTransporte || '')
+  // El transporte arranca con el del pedido; si es nuevo, con el último que usó
+  // el cliente. Sigue siendo editable y lo que se guarde vuelve a la ficha.
+  const [transporte, setTransporte] = useState(initialTransporte || clienteTransporteHabitual || '')
+  // Sugerencias del combo paramétrico de transportes (tabla `entidades`). El campo
+  // sigue siendo texto libre: se puede escribir uno que no esté en la lista.
+  const [transportesSugeridos, setTransportesSugeridos] = useState<string[]>([])
+
+  // Libreta de direcciones de entrega del cliente.
+  const [direcciones, setDirecciones] = useState<ClienteDireccion[]>([])
+  const [direccionEntregaId, setDireccionEntregaId] = useState<number | null>(
+    initialDireccionEntregaId ?? null
+  )
+  const [etiquetaNueva, setEtiquetaNueva] = useState('')
+
+  // Plan de cobro: cómo se va a cobrar el pedido y a qué cuenta entra cada parte.
+  // Es un dato para cobranza; no crea pagos ni mueve la cuenta corriente.
+  const [planPago, setPlanPago] = useState<PedidoPlanPago[]>(initialPlanPago ?? [])
+  const [cuentas, setCuentas] = useState<CuentaSimple[]>([])
+  const [formasPago, setFormasPago] = useState<string[]>([])
+
+  // Índice de la línea que el modal está editando. null = alta de una línea nueva.
+  // Es lo que hace que el mismo modal sirva para agregar y para corregir, sin
+  // duplicar la validación de stock, precio y depósito.
+  const [editandoIdx, setEditandoIdx] = useState<number | null>(null)
+  const [guardandoDireccion, setGuardandoDireccion] = useState(false)
   // Envío: campos editables por pedido (domicilio, localidad, CP, provincia), precargados del cliente.
   const componerDireccion = (dom?: string, loc?: string, prov?: string, cp?: string) =>
     ([dom, loc, prov].filter(Boolean).join(', ') + (cp ? ` (CP ${cp})` : '')).trim()
@@ -221,13 +267,15 @@ export default function PedidoForm({
     // Nuevo pedido: por defecto según el plazo del cliente (o mañana).
     return isEditing ? null : compromisoDefault
   })
-  const [despachado, setDespachado] = useState(initialDespachado || false)
   const [tipoPrecio, setTipoPrecio] = useState<Grupo>(() => {
     if (esGrupo(initialTipoPrecio)) return initialTipoPrecio
     if (esGrupo(clienteTipo)) return clienteTipo
     return 'minorista'
   })
-  const [bultos, setBultos] = useState(initialBultos || 0)
+  // Pedido que no compromete mercadería: se usa en operaciones de volumen que se
+  // facturan antes de que entre el ingreso del proveedor. Mientras está apagado
+  // el form no limita las cantidades por stock, porque la mercadería no entró.
+  const [reservaStock, setReservaStock] = useState(initialReservaStock ?? true)
   const [items, setItems] = useState<PedidoItemLocal[]>(initialItems)
   const itemsRef = useRef(items)
   itemsRef.current = items
@@ -297,6 +345,105 @@ export default function PedidoForm({
     }
   }, [isAdmin])
 
+  useEffect(() => {
+    api.get<{ items: { nombre: string }[] }>('/entidades', {
+      params: { categoria: 'transporte', solo_activos: true },
+    })
+      .then((res) => setTransportesSugeridos(res.data.items.map((e) => e.nombre)))
+      .catch(() => { /* el campo sigue siendo texto libre: sin sugerencias se puede tipear */ })
+
+    api.get<{ items: { nombre: string }[] }>('/entidades', {
+      params: { categoria: 'condicion_pago', solo_activos: true },
+    })
+      .then((res) => setFormasPago(res.data.items.map((e) => e.nombre)))
+      .catch(() => { /* idem */ })
+
+    api.get<CuentaSimple[]>('/cuentas')
+      .then((res) => setCuentas(res.data.filter((c) => c.activo !== false)))
+      .catch(() => { /* sin cuentas el plan igual se puede cargar, solo sin destino */ })
+  }, [])
+
+  // --- Plan de cobro ---------------------------------------------------------
+
+  const totalPlanPago = useMemo(
+    () => planPago.reduce((suma, t) => suma + (Number(t.importe) || 0), 0),
+    [planPago]
+  )
+
+  const agregarTramoPago = () =>
+    setPlanPago((prev) => [
+      ...prev,
+      {
+        forma: formasPago[0] ?? 'Contado',
+        cuenta_id: cuentas.find((c) => c.es_default)?.id ?? null,
+        // El primer tramo arranca con el total del pedido: el caso más común es
+        // uno solo, y así no hay que tipear el importe.
+        importe: prev.length === 0 ? importeTotal : 0,
+      },
+    ])
+
+  const cambiarTramoPago = (idx: number, patch: Partial<PedidoPlanPago>) =>
+    setPlanPago((prev) => prev.map((t, i) => (i === idx ? { ...t, ...patch } : t)))
+
+  const quitarTramoPago = (idx: number) =>
+    setPlanPago((prev) => prev.filter((_, i) => i !== idx))
+
+  useEffect(() => {
+    if (!clienteId) return
+    api.get<ClienteDireccion[]>(`/clientes/${clienteId}/direcciones`)
+      .then((res) => {
+        setDirecciones(res.data)
+        // Pedido nuevo sin dirección elegida: se propone la marcada por defecto.
+        setDireccionEntregaId((actual) => {
+          if (actual !== null) return actual
+          if (initialDireccionEntrega) return null  // el pedido ya trae una escrita a mano
+          const porDefecto = res.data.find((d) => d.es_default) ?? res.data[0]
+          if (porDefecto) setDireccionEntrega(porDefecto.direccion)
+          return porDefecto?.id ?? null
+        })
+      })
+      .catch(() => toast.error('No se pudieron cargar las direcciones del cliente'))
+  }, [clienteId, initialDireccionEntrega])
+
+  const elegirDireccion = (valor: string) => {
+    if (valor === 'otra') {
+      setDireccionEntregaId(null)
+      return
+    }
+    const id = Number(valor)
+    const elegida = direcciones.find((d) => d.id === id)
+    if (!elegida) return
+    setDireccionEntregaId(id)
+    setDireccionEntrega(elegida.direccion)
+  }
+
+  // Guardar la dirección tipeada a mano en la libreta del cliente, para no
+  // volver a escribirla en el próximo pedido.
+  const guardarDireccionEnCliente = async () => {
+    const texto = direccionEntrega.trim()
+    if (!texto) {
+      toast.error('Escribí la dirección antes de guardarla')
+      return
+    }
+    setGuardandoDireccion(true)
+    try {
+      const res = await api.post<ClienteDireccion>(`/clientes/${clienteId}/direcciones`, {
+        etiqueta: etiquetaNueva.trim() || 'Entrega',
+        direccion: texto,
+        es_default: direcciones.length === 0,
+      })
+      setDirecciones((prev) => [...prev, res.data])
+      setDireccionEntregaId(res.data.id)
+      setEtiquetaNueva('')
+      toast.success('Dirección guardada en la ficha del cliente')
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(typeof detail === 'string' ? detail : 'No se pudo guardar la dirección')
+    } finally {
+      setGuardandoDireccion(false)
+    }
+  }
+
   // Payload de ítems: única fuente de verdad para autosave y para finalizar.
   const itemsPayload = useMemo(
     () =>
@@ -313,6 +460,26 @@ export default function PedidoForm({
     [items, depositoId]
   )
 
+  // El catálogo se precarga una sola vez, así que el stock que ve el form
+  // envejece a medida que se carga el pedido: cada línea que se guarda mueve
+  // físico a reservado en el server. Con las cantidades editables en la grilla
+  // eso se nota enseguida, así que después de cada guardado se refresca el stock
+  // de los productos que están en el pedido.
+  const refrescarStockDeItems = useCallback(async () => {
+    const ids = Array.from(new Set(itemsRef.current.map((i) => i.producto_id)))
+    if (ids.length === 0) return
+    try {
+      const frescos = await Promise.all(
+        ids.map((id) => api.get<Producto>(`/productos/${id}`).then((r) => r.data))
+      )
+      const porId = new Map(frescos.map((p) => [p.id, p]))
+      setTodosProductos((prev) => prev.map((p) => porId.get(p.id) ?? p))
+    } catch {
+      // Si falla, se sigue con el stock que ya estaba: el server igual valida
+      // cada reserva, así que lo peor que pasa es un aviso tardío.
+    }
+  }, [])
+
   // Robust Auto-save logic (Debounced and duplicate-protected)
   const previousData = useRef<string | null>(null)
 
@@ -321,17 +488,17 @@ export default function PedidoForm({
       items: itemsPayload,
       tipoDocumento,
       fecha: fechaCreacionDate ? fechaCreacionDate.toString() : null,
-      fechaEntrega: fechaEntrega ? fechaEntrega.toString() : null,
       observacion: observacion || null,
       transporte: transporte || null,
       direccionEntrega: direccionEntrega || null,
+      direccionEntregaId,
       sociedad: sociedad || null,
       deposito_id: depositoId,
       fechaCompromisoPago: fechaCompromisoPago ? fechaCompromisoPago.toString() : null,
-      despachado,
       tipo_precio: tipoPrecio,
       vendedor_id: vendedorId,
-      bultos,
+      reserva_stock: reservaStock,
+      plan_pago: planPago,
     })
 
     if (previousData.current === null) {
@@ -356,19 +523,25 @@ export default function PedidoForm({
           items: itemsPayload,
           observacion: observacion || null,
           fecha: fechaCreacionDate ? fechaCreacionDate.toString() : null,
-          fecha_entrega: fechaEntrega ? fechaEntrega.toString() : null,
           transporte: transporte || null,
           direccion_entrega: direccionEntrega || null,
+          direccion_entrega_id: direccionEntregaId,
           sociedad: sociedad || null,
           deposito_id: depositoId,
           fecha_compromiso_pago: fechaCompromisoPago ? fechaCompromisoPago.toString() : null,
-          despachado,
           tipo_precio: tipoPrecio,
           vendedor_id: vendedorId,
-          bultos,
+          reserva_stock: reservaStock,
+          plan_pago: planPago,
         })
+        await refrescarStockDeItems()
       } catch (err) {
         console.error('Auto-save error:', err)
+        // Prender "descuenta stock" sobre mercadería que no alcanza vuelve 400.
+        // Sin esto el rechazo pasaba en silencio y el form quedaba mostrando un
+        // estado que la base nunca aceptó.
+        const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        if (typeof detail === 'string') toast.error(detail)
       } finally {
         setAutoSaving(false)
         autoSavingRef.current = false
@@ -380,17 +553,18 @@ export default function PedidoForm({
     itemsPayload,
     tipoDocumento,
     fechaCreacionDate,
-    fechaEntrega,
     observacion,
     transporte,
+    direccionEntrega,
+    direccionEntregaId,
     sociedad,
     depositoId,
     fechaCompromisoPago,
-    despachado,
     pedidoId,
     vendedorId,
     tipoPrecio,
-    bultos,
+    reservaStock,
+    planPago,
   ])
 
 
@@ -438,6 +612,11 @@ export default function PedidoForm({
     [depositoId, stockEnDeposito]
   )
 
+  // El tope por stock solo aplica cuando el pedido reserva. Un pedido marcado
+  // para no descontar vende mercadería que todavía no entró: el disponible se
+  // sigue mostrando (depósito lo necesita) pero no bloquea la carga.
+  const limitaPorStock = reservaStock
+
   // Depósitos donde este producto sí tiene stock, para poder sugerir el cambio
   // en vez de dejar al vendedor frenado con un "no hay".
   const depositosConStock = useCallback(
@@ -460,10 +639,28 @@ export default function PedidoForm({
     [items, depositoId]
   )
 
+  // Stock que una línea puede tomar. Al editar hay que sumarle lo que esa misma
+  // línea ya tiene reservado en el server: el disponible que ve el form ya lo
+  // tiene descontado, así que sin esto subir de 10 a 11 se bloquearía cuando esa
+  // línea se llevó el último stock.
+  const disponibleParaLinea = useCallback(
+    (producto: Producto, unidad: UnidadVenta, deposito: number | null, idx: number | null) => {
+      const base = getAvailableStock(producto, unidad, deposito)
+      if (idx === null) return base
+      const original = items[idx]
+      if (!original || original.producto_id !== producto.id) return base
+      if (original.unidad_venta !== unidad) return base
+      if ((original.deposito_id ?? depositoId) !== deposito) return base
+      return base + original.cantidad
+    },
+    [getAvailableStock, items, depositoId]
+  )
+
   // Sin stock suficiente para lo que se está tratando de agregar: bloquea el alta.
   const modalStockInsuficiente =
+    limitaPorStock &&
     selectedProduct !== null &&
-    modalCantidad > getAvailableStock(selectedProduct, modalUnidad, modalDepositoEfectivo)
+    modalCantidad > disponibleParaLinea(selectedProduct, modalUnidad, modalDepositoEfectivo, editandoIdx)
 
   // Otros depósitos donde sí hay, para ofrecer el cambio en el propio modal.
   const modalAlternativas = useMemo(
@@ -481,8 +678,8 @@ export default function PedidoForm({
 
   const handleCantidadChange = (e: React.ChangeEvent<HTMLInputElement>, selectedProduct: Producto) => {
     const cantidad = Number(e.target.value)
-    const disponible = getAvailableStock(selectedProduct, modalUnidad, modalDepositoEfectivo)
-    if (cantidad > disponible) {
+    const disponible = disponibleParaLinea(selectedProduct, modalUnidad, modalDepositoEfectivo, editandoIdx)
+    if (limitaPorStock && cantidad > disponible) {
       const u = modalUnidad === 'blister' ? 'blísters' : 'cajas'
       toast.error(`No puedes pedir más de ${disponible} ${u}`)
       return
@@ -550,6 +747,7 @@ export default function PedidoForm({
   }, [tipoPrecio, precioBase])
 
   const openModal = () => {
+    setEditandoIdx(null)
     setProductSearch('')
     setSelectedProduct(null)
     setModalCantidad(1)
@@ -557,6 +755,27 @@ export default function PedidoForm({
     setModalDescuento(0)
     setModalPrecioLista(0)
     setModalUnidad('caja')
+    setModalOpen(true)
+  }
+
+  /** Abre el modal con una línea ya cargada, para cambiarle producto,
+   *  depósito o unidad. Los datos "de plata" también se editan en la grilla. */
+  const abrirEdicionLinea = (idx: number) => {
+    const linea = items[idx]
+    const producto = todosProductos.find((p) => p.id === linea.producto_id)
+    if (!producto) {
+      toast.error('No se encontró el producto de esa línea en el catálogo')
+      return
+    }
+    setEditandoIdx(idx)
+    setSelectedProduct(producto)
+    setModalUnidad(linea.unidad_venta)
+    setModalPrecioLista(linea.precio_lista ?? linea.precio_unitario)
+    setModalPrecio(linea.precio_unitario)
+    setModalDescuento(linea.descuento_porcentaje ?? 0)
+    setModalCantidad(linea.cantidad)
+    setModalDeposito(linea.deposito_id ?? null)
+    setProductSearch('')
     setModalOpen(true)
   }
 
@@ -591,11 +810,14 @@ export default function PedidoForm({
     setModalPrecio(modalPrecioLista * (1 - desc / 100))
   }
 
-  // keepOpen=true: agrega el ítem y vuelve al buscador para cargar otro (sin cerrar).
+  // keepOpen=true: guarda y vuelve al buscador para cargar otro (sin cerrar).
+  // Sirve tanto para el alta como para la edición: `editandoIdx` decide si la
+  // línea se agrega al final o reemplaza a la que se estaba corrigiendo.
   const addItem = (keepOpen = false) => {
     if (!selectedProduct) return
 
-    if (items.some((item) => item.producto_id === selectedProduct.id)) {
+    // Al editar, que la línea "duplique" su propio producto es lo normal.
+    if (items.some((item, i) => item.producto_id === selectedProduct.id && i !== editandoIdx)) {
       toast.error(`${selectedProduct.nombre} ya está en el pedido`)
       return
     }
@@ -616,8 +838,8 @@ export default function PedidoForm({
       toast.error('Elegí el depósito del que sale la mercadería')
       return
     }
-    const disponible = getAvailableStock(selectedProduct, modalUnidad, depLinea)
-    if (modalCantidad > disponible) {
+    const disponible = disponibleParaLinea(selectedProduct, modalUnidad, depLinea, editandoIdx)
+    if (limitaPorStock && modalCantidad > disponible) {
       const u = modalUnidad === 'blister' ? 'blísters' : 'cajas'
       const depNombre = depositos.find((d) => d.id === depLinea)?.nombre ?? 'el depósito'
       const alternativas = depositosConStock(selectedProduct, modalUnidad).filter((d) => d.id !== depLinea)
@@ -646,6 +868,15 @@ export default function PedidoForm({
       blisters_por_caja: selectedProduct.blisters_por_caja,
     }
 
+    if (editandoIdx !== null) {
+      const idx = editandoIdx
+      setItems((prev) => prev.map((item, i) => (i === idx ? newItem : item)))
+      toast.success(`${selectedProduct.nombre} actualizado`)
+      setEditandoIdx(null)
+      setModalOpen(false)
+      return
+    }
+
     setItems((prev) => [...prev, newItem])
     toast.success(`${selectedProduct.nombre} agregado`)
 
@@ -668,6 +899,61 @@ export default function PedidoForm({
     setItems((prev) => prev.filter((_, i) => i !== index))
   }
 
+  /** Edición directa en la grilla: cantidad, descuento y precio unitario.
+   *  Usa la misma cuenta que el modal (`recalcularLinea`) para que no puedan
+   *  dar números distintos. El autosave persiste solo, como con cualquier
+   *  otro cambio del pedido. */
+  const editarLinea = (
+    idx: number,
+    patch: Partial<Pick<PedidoItemLocal, 'cantidad' | 'descuento_porcentaje' | 'precio_unitario'>>,
+  ) => {
+    setItems((prev) =>
+      prev.map((linea, i) => {
+        if (i !== idx) return linea
+
+        const cantidad = patch.cantidad ?? linea.cantidad
+        const descuento = patch.descuento_porcentaje !== undefined
+          ? patch.descuento_porcentaje
+          : linea.descuento_porcentaje
+        const base = linea.precio_lista ?? linea.precio_unitario
+
+        // Tocar el descuento reprecia desde la lista; tocar el precio a mano lo
+        // fija y el descuento queda solo como referencia de dónde salió.
+        const unitario = patch.precio_unitario !== undefined
+          ? patch.precio_unitario
+          : patch.descuento_porcentaje !== undefined
+            ? precioConDescuento(base, descuento ?? 0)
+            : linea.precio_unitario
+
+        const { precioUnitario, precioTotal } = recalcularLinea({
+          precioLista: linea.precio_lista,
+          descuento: descuento,
+          precioUnitario: unitario,
+          cantidad,
+        })
+
+        return {
+          ...linea,
+          cantidad,
+          descuento_porcentaje: descuento,
+          // Sin precio de lista guardado, el descuento no tiene contra qué
+          // aplicarse: se guarda el unitario actual como base.
+          precio_lista: linea.precio_lista ?? (descuento ? linea.precio_unitario : null),
+          precio_unitario: precioUnitario,
+          precio_total: precioTotal,
+        }
+      })
+    )
+  }
+
+  /** Cantidad máxima que admite una línea ya cargada, para el input de la grilla. */
+  const topeDeLinea = (linea: PedidoItemLocal, idx: number): number | undefined => {
+    if (!limitaPorStock) return undefined
+    const producto = todosProductos.find((p) => p.id === linea.producto_id)
+    if (!producto) return undefined
+    return disponibleParaLinea(producto, linea.unidad_venta, linea.deposito_id ?? depositoId, idx)
+  }
+
   const handleFinalize = async () => {
     if (items.length === 0) {
       toast.error('Debe agregar al menos un producto')
@@ -685,18 +971,23 @@ export default function PedidoForm({
         items: itemsPayload,
         observacion: observacion || null,
         fecha: fechaCreacionDate ? fechaCreacionDate.toString() : null,
-        fecha_entrega: fechaEntrega ? fechaEntrega.toString() : null,
         transporte: transporte || null,
         direccion_entrega: direccionEntrega || null,
+        direccion_entrega_id: direccionEntregaId,
         sociedad: sociedad || null,
         deposito_id: depositoId,
         fecha_compromiso_pago: fechaCompromisoPago ? fechaCompromisoPago.toString() : null,
-        despachado,
         tipo_precio: tipoPrecio,
         vendedor_id: vendedorId,
-        bultos,
-        estado: 'pedido',
+        reserva_stock: reservaStock,
+        plan_pago: planPago,
       })
+      // Finalizar es lo que saca al pedido de borrador y lo pone en la cola de
+      // depósito. Un pedido que ya se finalizó antes se guarda y listo: volver a
+      // moverlo de estado sería un error de transición.
+      if (shippingStatus === 'borrador') {
+        await api.patch(`/pedidos/${pedidoId}/shipping-status`, { shipping_status: 'pendiente' })
+      }
       toast.success('Pedido finalizado exitosamente')
       router.push('/dashboard/pedidos')
     } catch (err: unknown) {
@@ -863,11 +1154,6 @@ export default function PedidoForm({
             </select>
             <p className="text-[11px] text-gray-500 mt-1">De dónde sale la mercadería</p>
           </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Bultos</label>
-            <input type="number" min={0} value={bultos} onChange={(e) => setBultos(parseInt(e.target.value) || 0)}
-              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]" />
-          </div>
         </div>
 
         {/* Fechas */}
@@ -882,19 +1168,15 @@ export default function PedidoForm({
             {!isEditing && <p className="text-[11px] text-gray-400 mt-1">Por defecto: hoy</p>}
           </div>
           <div>
-            <DatePicker value={fechaEntrega} onChange={setFechaEntrega}>
-              <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Entrega</label>
-              <DateInput className="flex gap-0.5 w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus-within:ring-2 focus-within:ring-[#003087]/20 focus-within:border-[#003087] bg-white">
-                {(segment) => (<DateSegmentInput segment={segment} className="rounded px-0.5 outline-none focus:bg-[#003087] focus:text-white data-[placeholder]:text-gray-400" />)}
-              </DateInput>
-            </DatePicker>
-            {!isEditing && (
-              <p className="text-[11px] text-gray-400 mt-1">
-                {diasEntregaCliente != null
-                  ? `Cliente: ${diasEntregaCliente} ${diasEntregaCliente === 1 ? 'día' : 'días'}`
-                  : 'Por defecto: mañana'}
-              </p>
-            )}
+            <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Entrega (sugerida)</label>
+            <div className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-gray-50 text-gray-600">
+              {fechaEntregaSugerida ?? 'A definir'}
+            </div>
+            <p className="text-[11px] text-gray-400 mt-1">
+              {diasEntregaCliente != null
+                ? `Cliente: ${diasEntregaCliente} ${diasEntregaCliente === 1 ? 'día' : 'días'}. La confirma depósito.`
+                : 'La confirma depósito al armar el pedido.'}
+            </p>
           </div>
           <div>
             <DatePicker value={fechaCompromisoPago} onChange={setFechaCompromisoPago}>
@@ -911,76 +1193,235 @@ export default function PedidoForm({
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Transporte</label>
-            <input type="text" value={transporte} onChange={(e) => setTransporte(e.target.value)} placeholder="OCA, propio..."
+            <input type="text" list="transportes-sugeridos" value={transporte}
+              onChange={(e) => setTransporte(e.target.value)} placeholder="OCA, propio..."
               className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]" />
+            <datalist id="transportes-sugeridos">
+              {transportesSugeridos.map((t) => <option key={t} value={t} />)}
+            </datalist>
+            {clienteTransporteHabitual && transporte === clienteTransporteHabitual && (
+              <p className="text-[11px] text-gray-400 mt-1">El último que usó este cliente</p>
+            )}
           </div>
         </div>
 
-        {/* Envío — campos editables por pedido (precargados del cliente) */}
+        {/* Envío — se elige de la libreta del cliente, o se escribe una suelta */}
         <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50/50 p-3">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-gray-600 uppercase tracking-wide">Envío</span>
-            {clienteDireccionDefault && direccionEntrega !== clienteDireccionDefault && (
+            <span className="text-xs font-bold text-gray-600 uppercase tracking-wide">Dirección de entrega</span>
+            {clienteDireccionDefault && direccionEntregaId === null && direccionEntrega !== clienteDireccionDefault && (
               <button type="button" onClick={usarDireccionCliente} className="text-[11px] font-medium text-[#003087] hover:underline">
                 Usar la del cliente
               </button>
             )}
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <div className="col-span-2">
-              <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Domicilio</label>
-              <input type="text" value={envioDomicilio} onChange={(e) => onEnvioChange({ dom: e.target.value })} placeholder="Calle y número"
-                className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]" />
-            </div>
-            <div>
-              <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Localidad</label>
-              <input type="text" value={envioLocalidad} onChange={(e) => onEnvioChange({ loc: e.target.value })}
-                className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]" />
-            </div>
-            <div>
-              <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Cód. postal</label>
-              <input type="text" value={envioCp} onChange={(e) => onEnvioChange({ cp: e.target.value })}
-                className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]" />
-            </div>
-            <div className="col-span-2 sm:col-span-4">
-              <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Provincia</label>
-              <input type="text" value={envioProvincia} onChange={(e) => onEnvioChange({ prov: e.target.value })}
-                className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]" />
-            </div>
-          </div>
+          <select
+            value={direccionEntregaId ?? 'otra'}
+            onChange={(e) => elegirDireccion(e.target.value)}
+            className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
+          >
+            {direcciones.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.etiqueta}: {d.direccion}
+                {d.localidad_nombre ? ` (${d.localidad_nombre})` : ''}
+              </option>
+            ))}
+            <option value="otra">Otra dirección…</option>
+          </select>
 
-          <div className="mt-2">
-            <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Dirección de entrega (lo que se guarda)</label>
-            <textarea
-              value={direccionEntrega}
-              onChange={(e) => setDireccionEntrega(e.target.value)}
-              rows={2}
-              placeholder="Se arma con los campos de arriba; podés ajustarla."
-              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] resize-none bg-white"
-            />
-          </div>
-          {!(clienteDomicilio || clienteLocalidad || clienteCodigoPostal || clienteProvincia) && (
+          {direccionEntregaId === null && (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+                <div className="col-span-2">
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Domicilio</label>
+                  <input type="text" value={envioDomicilio} onChange={(e) => onEnvioChange({ dom: e.target.value })} placeholder="Calle y número"
+                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]" />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Localidad</label>
+                  <input type="text" value={envioLocalidad} onChange={(e) => onEnvioChange({ loc: e.target.value })}
+                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]" />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Cód. postal</label>
+                  <input type="text" value={envioCp} onChange={(e) => onEnvioChange({ cp: e.target.value })}
+                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]" />
+                </div>
+                <div className="col-span-2 sm:col-span-4">
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Provincia</label>
+                  <input type="text" value={envioProvincia} onChange={(e) => onEnvioChange({ prov: e.target.value })}
+                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]" />
+                </div>
+              </div>
+
+              <div className="mt-2">
+                <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Dirección de entrega (lo que se guarda)</label>
+                <textarea
+                  value={direccionEntrega}
+                  onChange={(e) => setDireccionEntrega(e.target.value)}
+                  rows={2}
+                  placeholder="Se arma con los campos de arriba; podés ajustarla."
+                  className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] resize-none bg-white"
+                />
+              </div>
+
+              {/* Guardarla en la ficha evita retipearla en el próximo pedido */}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={etiquetaNueva}
+                  onChange={(e) => setEtiquetaNueva(e.target.value)}
+                  placeholder="Nombre (ej: Sucursal Centro)"
+                  className="flex-1 min-w-[160px] px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
+                />
+                <button
+                  type="button"
+                  onClick={guardarDireccionEnCliente}
+                  disabled={guardandoDireccion || !direccionEntrega.trim()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-[#003087] bg-[#003087]/10 hover:bg-[#003087]/20 disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  {guardandoDireccion ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  Guardar para este cliente
+                </button>
+              </div>
+            </>
+          )}
+
+          {!(clienteDomicilio || clienteLocalidad || clienteCodigoPostal || clienteProvincia) && direcciones.length === 0 && (
             <p className="text-[11px] text-amber-600 mt-1">El cliente no tiene domicilio/localidad cargados. Cargalos en su ficha para autocompletar.</p>
           )}
         </div>
 
-        {/* Observación + despachado */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-x-4 gap-y-3 mt-4 pt-4 border-t border-gray-50">
-          <div className="md:col-span-3">
-            <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Observación</label>
-            <textarea value={observacion} onChange={(e) => setObservacion(e.target.value)} rows={2}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] resize-none"
-              placeholder="Observaciones del pedido..." />
-          </div>
-          <div className="flex items-end pb-1.5">
-            <label htmlFor="despachado" className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
-              <input id="despachado" type="checkbox" checked={despachado} onChange={(e) => setDespachado(e.target.checked)}
-                className="w-4 h-4 text-[#003087] border-gray-300 rounded focus:ring-[#003087]/20" />
-              Despachado
-            </label>
-          </div>
+        {/* Observación */}
+        <div className="mt-4 pt-4 border-t border-gray-50">
+          <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Observación</label>
+          <textarea value={observacion} onChange={(e) => setObservacion(e.target.value)} rows={2}
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] resize-none"
+            placeholder="Observaciones del pedido..." />
         </div>
+
+        {/* Pedido que no compromete mercadería */}
+        <div className="mt-4 pt-4 border-t border-gray-50">
+          <label htmlFor="reserva_stock" className="inline-flex items-start gap-2.5 cursor-pointer">
+            <input
+              id="reserva_stock"
+              type="checkbox"
+              checked={!reservaStock}
+              onChange={(e) => setReservaStock(!e.target.checked)}
+              className="mt-0.5 w-4 h-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500/20"
+            />
+            <span>
+              <span className="block text-sm font-medium text-gray-700">Este pedido no descuenta stock</span>
+              <span className="block text-xs text-gray-500">
+                Para operaciones de volumen que se facturan antes de que entre la mercadería.
+              </span>
+            </span>
+          </label>
+
+          {!reservaStock && (
+            <div className="mt-3 flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-800 leading-relaxed">
+                La mercadería de este pedido <strong>no está reservada</strong>: se puede vender a otro
+                cliente. Cuando entre el ingreso, destildá esta opción y el stock se descuenta ahí
+                mismo (si no alcanza, el sistema avisa y no lo deja).
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Plan de cobro — informativo: no genera pagos ni mueve cuenta corriente */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-semibold text-gray-900">Cómo paga</h2>
+          <button
+            type="button"
+            onClick={agregarTramoPago}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-[#003087] bg-[#003087]/10 hover:bg-[#003087]/20"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Agregar forma de pago
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 mb-4">
+          Cómo se va a cobrar y a qué cuenta entra cada parte. Es una indicación para
+          cobranza: no registra el cobro ni afecta la cuenta corriente.
+        </p>
+
+        {planPago.length === 0 ? (
+          <p className="text-sm text-gray-400 py-3">
+            Sin especificar. Se puede dejar vacío si el pedido se cobra de una sola forma.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {planPago.map((tramo, idx) => (
+              <div key={idx} className="grid grid-cols-12 gap-2 items-end">
+                <div className="col-span-4">
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Forma</label>
+                  <input
+                    type="text"
+                    list="formas-pago-sugeridas"
+                    value={tramo.forma}
+                    onChange={(e) => cambiarTramoPago(idx, { forma: e.target.value })}
+                    placeholder="Transferencia, efectivo..."
+                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
+                  />
+                </div>
+                <div className="col-span-5">
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Cuenta destino</label>
+                  <select
+                    value={tramo.cuenta_id ?? ''}
+                    onChange={(e) => cambiarTramoPago(idx, { cuenta_id: e.target.value ? Number(e.target.value) : null })}
+                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
+                  >
+                    <option value="">Sin definir</option>
+                    {cuentas.map((c) => (
+                      <option key={c.id} value={c.id}>{c.nombre}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Importe</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={tramo.importe}
+                    onChange={(e) => cambiarTramoPago(idx, { importe: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-2.5 py-1.5 text-sm text-right border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
+                  />
+                </div>
+                <div className="col-span-1 flex justify-center pb-1">
+                  <button
+                    type="button"
+                    onClick={() => quitarTramoPago(idx)}
+                    className="p-1 rounded-lg text-red-500 hover:bg-red-50"
+                    title="Quitar"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+            <datalist id="formas-pago-sugeridas">
+              {formasPago.map((f) => <option key={f} value={f} />)}
+            </datalist>
+
+            <div className="flex justify-end gap-6 pt-2 border-t border-gray-50 text-sm">
+              <span className="text-gray-500">
+                Asignado: <strong className="text-gray-900">{formatCurrency(totalPlanPago)}</strong>
+              </span>
+              {Math.abs(totalPlanPago - importeTotal) > 0.009 && (
+                <span className={totalPlanPago > importeTotal ? 'text-red-600 font-medium' : 'text-amber-600 font-medium'}>
+                  {totalPlanPago > importeTotal ? 'Se pasa por ' : 'Faltan asignar '}
+                  {formatCurrency(Math.abs(totalPlanPago - importeTotal))}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Items Section */}
@@ -1056,7 +1497,7 @@ export default function PedidoForm({
                     Precio Total
                   </th>
                   <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                    Quitar
+                    Acciones
                   </th>
                 </tr>
               </thead>
@@ -1072,35 +1513,64 @@ export default function PedidoForm({
                           ?? '-'}
                       </td>
                     )}
-                    <td className="px-4 py-2 text-gray-700 text-right">
+                    <td className="px-4 py-2 text-right">
                       <span className="inline-flex items-center gap-1.5">
-                        {item.cantidad}
+                        <input
+                          type="number"
+                          min={1}
+                          max={topeDeLinea(item, idx)}
+                          value={item.cantidad}
+                          onChange={(e) => editarLinea(idx, { cantidad: parseInt(e.target.value, 10) || 0 })}
+                          className="w-16 px-1.5 py-1 text-sm text-right border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
+                        />
                         <span className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide rounded-full border ${item.unidad_venta === 'blister' ? 'text-[#00AEEF] bg-[#00AEEF]/10 border-[#00AEEF]/30' : 'text-gray-500 bg-gray-100 border-gray-200'}`}>
                           {item.unidad_venta === 'blister' ? 'Blíster' : 'Caja'}
                         </span>
                       </span>
                     </td>
                     <td className="px-4 py-2 text-right">
-                      {item.descuento_porcentaje
-                        ? <span className="text-orange-600 font-medium">{item.descuento_porcentaje}%</span>
-                        : <span className="text-gray-400">-</span>
-                      }
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.01}
+                        value={item.descuento_porcentaje ?? 0}
+                        onChange={(e) => editarLinea(idx, { descuento_porcentaje: parseFloat(e.target.value) || 0 })}
+                        className="w-16 px-1.5 py-1 text-sm text-right border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
+                      />
                     </td>
-                    <td className="px-4 py-2 text-gray-700 text-right">
-                      {formatCurrency(item.precio_unitario)}
+                    <td className="px-4 py-2 text-right">
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={item.precio_unitario}
+                        onChange={(e) => editarLinea(idx, { precio_unitario: parseFloat(e.target.value) || 0 })}
+                        className="w-24 px-1.5 py-1 text-sm text-right border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
+                      />
                     </td>
                     <td className="px-4 py-2 text-gray-700 text-right font-semibold">
                       {formatCurrency(item.precio_total)}
                     </td>
-                    <td className="px-4 py-2 text-center">
-                      <button
-                        type="button"
-                        onClick={() => removeItem(idx)}
-                        className="p-1 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
-                        title="Quitar producto"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
+                    <td className="px-4 py-2">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => abrirEdicionLinea(idx)}
+                          className="p-1 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-[#003087] transition-colors"
+                          title="Cambiar producto, depósito o unidad"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeItem(idx)}
+                          className="p-1 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
+                          title="Quitar producto"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1162,7 +1632,9 @@ export default function PedidoForm({
           <div className="relative bg-white rounded-xl shadow-xl border border-gray-200 w-full max-w-lg mx-4 max-h-[90vh] flex flex-col">
             {/* Modal Header */}
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <h3 className="text-lg font-semibold text-gray-900">Agregar Producto</h3>
+              <h3 className="text-lg font-semibold text-gray-900">
+                {editandoIdx === null ? 'Agregar Producto' : 'Editar línea'}
+              </h3>
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
@@ -1400,7 +1872,7 @@ export default function PedidoForm({
                         type="number"
                         min={1}
                         value={modalCantidad}
-                        max={getAvailableStock(selectedProduct, modalUnidad, modalDepositoEfectivo)}
+                        max={limitaPorStock ? disponibleParaLinea(selectedProduct, modalUnidad, modalDepositoEfectivo, editandoIdx) : undefined}
                         onChange={(e) => handleCantidadChange(e, selectedProduct)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
@@ -1463,25 +1935,28 @@ export default function PedidoForm({
                     type="button"
                     onClick={() => setSelectedProduct(null)}
                     className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                    title={editandoIdx === null ? 'Volver al buscador' : 'Elegir otro producto para esta línea'}
                   >
-                    Volver
+                    {editandoIdx === null ? 'Volver' : 'Cambiar producto'}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => addItem(true)}
-                    disabled={modalSinPreciosComercio || modalStockInsuficiente}
-                    className="px-4 py-2 text-sm font-medium text-[#003087] bg-[#003087]/10 rounded-lg hover:bg-[#003087]/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    title="Agrega y vuelve al buscador para cargar otro"
-                  >
-                    Agregar y seguir
-                  </button>
+                  {editandoIdx === null && (
+                    <button
+                      type="button"
+                      onClick={() => addItem(true)}
+                      disabled={modalSinPreciosComercio || modalStockInsuficiente}
+                      className="px-4 py-2 text-sm font-medium text-[#003087] bg-[#003087]/10 rounded-lg hover:bg-[#003087]/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title="Agrega y vuelve al buscador para cargar otro"
+                    >
+                      Agregar y seguir
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => addItem(false)}
                     disabled={modalSinPreciosComercio || modalStockInsuficiente}
                     className="px-4 py-2 text-sm font-medium text-white bg-[#003087] rounded-lg hover:bg-[#002570] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
-                    Agregar
+                    {editandoIdx === null ? 'Agregar' : 'Guardar cambios'}
                   </button>
                 </>
               ) : (

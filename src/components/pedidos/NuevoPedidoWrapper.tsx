@@ -115,6 +115,7 @@ export default function NuevoPedidoWrapper({ initialClienteId }: NuevoPedidoWrap
           We can just render the PedidoForm. */}
       <PedidoForm
         pedidoId={pedido.id}
+        clienteId={cliente.id}
         clienteNombre={cliente.nombre}
         clienteTipo={cliente.tipo}
         clienteCondicionPago={cliente.condicion_pago}
@@ -124,6 +125,7 @@ export default function NuevoPedidoWrapper({ initialClienteId }: NuevoPedidoWrap
         clienteLocalidad={cliente.localidad_nombre}
         clienteCodigoPostal={cliente.localidad_codigo_postal}
         clienteProvincia={cliente.localidad_provincia}
+        clienteTransporteHabitual={cliente.transporte_habitual}
         numeroPedido={pedido.numero_pedido}
         vendedorNombre={user?.nombre_completo || user?.username || ''}
         initialVendedorId={user?.id}
@@ -134,7 +136,9 @@ export default function NuevoPedidoWrapper({ initialClienteId }: NuevoPedidoWrap
         initialObservacion={pedido.observacion || ''}
         initialTipoPrecio={pedido.tipo_precio}
         initialSociedad={pedido.sociedad || 'sanalle'}
-        initialBultos={pedido.bultos}
+        initialReservaStock={pedido.reserva_stock}
+        initialPlanPago={pedido.plan_pago}
+        shippingStatus={pedido.shipping_status}
         initialItems={[]}
         isEditing={false}
         onCancel={handleCancel}

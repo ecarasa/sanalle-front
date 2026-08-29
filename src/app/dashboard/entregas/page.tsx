@@ -272,6 +272,20 @@ export default function EntregasPage() {
     }
   }
 
+  // Bultos y despachado son datos de depósito/logística: van por el endpoint
+  // propio, que sigue abierto con el pedido ya fuera de `pendiente`.
+  const handleLogistica = async (
+    pedidoId: number,
+    cambios: { bultos?: number; despachado?: boolean },
+  ) => {
+    try {
+      await api.patch(`/pedidos/${pedidoId}/logistica`, cambios)
+      fetchEntregas()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'No se pudo guardar')
+    }
+  }
+
   const handleViewPdf = async (pedidoId: number) => {
     try {
       const res = await api.get(`/pedidos/${pedidoId}/pdf`, {
@@ -548,10 +562,38 @@ export default function EntregasPage() {
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${SHIPPING_BADGE[row.shipping_status] || 'bg-gray-100'}`}>
                               {SHIPPING_LABEL[row.shipping_status] || row.shipping_status}
                             </span>
-                            {row.bultos > 0 && (
-                              <span className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-full">
-                                {row.bultos} bultos
-                              </span>
+                            {esFuturo ? (
+                              row.bultos > 0 && (
+                                <span className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-full">
+                                  {row.bultos} bultos
+                                </span>
+                              )
+                            ) : (
+                              <label className="inline-flex items-center gap-1 text-xs text-gray-500">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  defaultValue={row.bultos}
+                                  onBlur={(e) => {
+                                    const valor = parseInt(e.target.value, 10) || 0
+                                    if (valor !== row.bultos) handleLogistica(row.id, { bultos: valor })
+                                  }}
+                                  className="w-14 px-1.5 py-0.5 text-xs text-right border border-gray-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#003087]/30"
+                                  title="Bultos"
+                                />
+                                bultos
+                              </label>
+                            )}
+                            {!esFuturo && (
+                              <label className="inline-flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={row.despachado}
+                                  onChange={(e) => handleLogistica(row.id, { despachado: e.target.checked })}
+                                  className="w-3.5 h-3.5 text-[#003087] border-gray-300 rounded focus:ring-[#003087]/20"
+                                />
+                                Despachado
+                              </label>
                             )}
 
                             <span className={`text-sm font-bold ${row.saldo_pendiente > 0 ? 'text-red-600' : 'text-green-600'}`}>

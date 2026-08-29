@@ -37,6 +37,7 @@ const CAMPO_LABEL: Record<string, string> = {
   transporte: 'Transporte',
   observacion: 'Observación',
   bultos: 'Bultos',
+  reserva_stock: 'Descuenta stock',
   sociedad: 'Sociedad',
   tipo_documento: 'Tipo de documento',
   despachado: 'Despachado',
