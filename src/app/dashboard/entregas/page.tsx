@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import dynamic from 'next/dynamic'
-import { Eye, X, Truck, FileText, MapPin, Phone, UserPlus, List, Map as MapIcon, ChevronDown, ChevronRight, ChevronLeft, Lock } from 'lucide-react'
+import { Eye, X, Truck, FileText, MapPin, Phone, UserPlus, List, Map as MapIcon, ChevronDown, ChevronRight, ChevronLeft, Lock, Layers } from 'lucide-react'
 import AsignarRepartidorModal from '@/components/pedidos/AsignarRepartidorModal'
 import EditarUbicacionModal from '@/components/entregas/EditarUbicacionModal'
 
@@ -80,11 +80,6 @@ function zonaColor(nombre: string): { header: string; dot: string; chip: string 
 export default function EntregasPage() {
   const { user } = useAuth()
   const isAdmin = user?.rol === 'admin' || user?.rol === 'super_admin'
-  // El admin ve todos los estados de logística; la logística (repartidor) no ve "En Preparación".
-  const visibleTabs = useMemo(
-    () => (isAdmin ? SHIPPING_TABS : SHIPPING_TABS.filter((t) => t.value !== 'en_preparacion')),
-    [isAdmin]
-  )
   const [search, setSearch] = useState('')
   const [shippingFilter, setShippingFilter] = useState<ShippingFilter>('listo_para_despacho')
   const [dataAll, setDataAll] = useState<Pedido[]>([])
@@ -101,9 +96,24 @@ export default function EntregasPage() {
   const hoyStr = new Date().toISOString().split('T')[0]
   // Fecha de entrega seleccionada (compartida entre lista y mapa).
   const [fechaSel, setFechaSel] = useState<string>(hoyStr)
+  // Vista "sin fecha": todo lo que está pendiente de despacho, sin importar para
+  // qué día quedó agendado. Un pedido que se termina de armar hoy pero se entrega
+  // pasado mañana no aparecía en ninguna pantalla hasta ese día.
+  const [sinFecha, setSinFecha] = useState(false)
+  // El admin ve todos los estados de logística; la logística (repartidor) no ve "En Preparación".
+  // En la vista sin fecha quedan solo los estados que son trabajo abierto: incluir
+  // "entregado" sin acotar por día traería el historial completo.
+  const visibleTabs = useMemo(() => {
+    const base = isAdmin ? SHIPPING_TABS : SHIPPING_TABS.filter((t) => t.value !== 'en_preparacion')
+    if (!sinFecha) return base
+    return base.filter((t) => t.value === 'listo_para_despacho' || t.value === 'en_camino')
+  }, [isAdmin, sinFecha])
+
   const esHoy = fechaSel === hoyStr
-  const esFuturo = fechaSel > hoyStr   // entregas de días futuros → solo lectura
-  const esPasado = fechaSel < hoyStr
+  // En la vista sin fecha no hay un "día futuro" que bloquear: se está mirando
+  // trabajo abierto, y sobre eso se opera.
+  const esFuturo = !sinFecha && fechaSel > hoyStr   // entregas de días futuros → solo lectura
+  const esPasado = !sinFecha && fechaSel < hoyStr
 
   // Navegación por día (+/- n días respecto a la fecha seleccionada).
   const moverDia = (delta: number) => {
@@ -232,7 +242,13 @@ export default function EntregasPage() {
         page_size: 500,
         sort_by: 'fecha_entrega',
         sort_dir: 'asc',
-        fecha_entrega: fechaSel,
+      }
+      if (sinFecha) {
+        // Sin acotar por día hay que acotar por estado: pedir todo traería el
+        // histórico completo y se comería el tope de 500.
+        params.estados = 'listo_para_despacho,en_camino'
+      } else {
+        params.fecha_entrega = fechaSel
       }
       // Traemos todos los estados de la fecha (no solo el filtro activo) para poder
       // mostrar la cantidad de pedidos de cada estado entre paréntesis en los tabs.
@@ -245,11 +261,19 @@ export default function EntregasPage() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, user, fechaSel])
+  }, [debouncedSearch, user, fechaSel, sinFecha])
 
   useEffect(() => {
     fetchEntregas()
   }, [fetchEntregas])
+
+  // Al pasar a "sin fecha", si la solapa activa no está entre las visibles
+  // (ej. En Preparación) la vista quedaría vacía sin explicación.
+  useEffect(() => {
+    if (sinFecha && !visibleTabs.some((t) => t.value === shippingFilter)) {
+      setShippingFilter('listo_para_despacho')
+    }
+  }, [sinFecha, visibleTabs, shippingFilter])
 
   // Cantidad total de pedidos por fecha de entrega (para la tira de fechas de arriba).
   useEffect(() => {
@@ -313,7 +337,7 @@ export default function EntregasPage() {
         </div>
 
         {/* Navegación por día (compartida lista/mapa) */}
-        <div className={`flex items-center gap-1.5 rounded-xl border px-2 py-1.5 shadow-sm ${esHoy ? 'bg-[#003087]/5 border-[#003087]/20' : esFuturo ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200'}`}>
+        <div className={`flex items-center gap-1.5 rounded-xl border px-2 py-1.5 shadow-sm transition-opacity ${sinFecha ? 'opacity-40 pointer-events-none' : ''} ${esHoy ? 'bg-[#003087]/5 border-[#003087]/20' : esFuturo ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200'}`}>
           <button onClick={() => moverDia(-1)} className="p-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 transition-colors" title="Día anterior">
             <ChevronLeft size={16} />
           </button>
@@ -342,7 +366,18 @@ export default function EntregasPage() {
         </div>
 
         <div className="flex items-center gap-2 self-start lg:self-auto">
-          <div className="flex rounded-lg border border-gray-300 overflow-hidden shadow-sm">
+          <button
+            type="button"
+            onClick={() => setSinFecha((v) => !v)}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium rounded-lg border shadow-sm transition-colors ${sinFecha
+              ? 'bg-[#00AEEF] text-white border-[#00AEEF]'
+              : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+            title="Todo lo que está por despacharse, sin importar para qué día quedó agendado"
+          >
+            <Layers size={15} />
+            Todos los pendientes
+          </button>
+          <div className={`flex rounded-lg border border-gray-300 overflow-hidden shadow-sm ${sinFecha ? 'opacity-40 pointer-events-none' : ''}`}>
             <button
               onClick={() => setVista('lista')}
               className={`flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium transition-colors ${vista === 'lista' ? 'bg-[#003087] text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
@@ -361,8 +396,18 @@ export default function EntregasPage() {
         </div>
       </div>
 
+      {sinFecha && (
+        <div className="flex items-center gap-2 rounded-xl border border-[#00AEEF]/30 bg-[#00AEEF]/5 px-3.5 py-2.5">
+          <Layers size={16} className="text-[#00AEEF] shrink-0" />
+          <p className="text-sm text-gray-700">
+            Mostrando <strong>todos los pedidos pendientes de despacho</strong>, sin filtrar por
+            fecha de entrega. La fecha agendada de cada uno se ve en su renglón.
+          </p>
+        </div>
+      )}
+
       {/* Tira de fechas: 4 días atrás, la seleccionada, 4 adelante — con cantidad total de pedidos de cada día */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+      <div className={`flex items-center gap-1.5 overflow-x-auto pb-1 ${sinFecha ? 'hidden' : ''}`}>
         {fechasCercanas.map((f) => {
           const activa = f.iso === fechaSel
           return (
