@@ -105,6 +105,7 @@ export default function EditarPedidoPage() {
       initialFechaEntrega={pedido.fecha_entrega || null}
       initialObservacion={pedido.observacion || ''}
       initialTransporte={pedido.transporte}
+      initialModalidadEntrega={pedido.modalidad_entrega}
       initialDireccionEntrega={pedido.direccion_entrega}
       initialDireccionEntregaId={pedido.direccion_entrega_id}
       clienteDomicilio={pedido.cliente_domicilio}

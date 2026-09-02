@@ -300,6 +300,9 @@ export interface PedidoPlanPago {
   observacion?: string | null;
 }
 
+/** Cómo llega la mercadería al cliente. Define qué remito se imprime. */
+export type ModalidadEntrega = 'envio' | 'retira';
+
 export interface Pedido {
   id: number;
   numero_pedido: string;
@@ -316,6 +319,8 @@ export interface Pedido {
   fecha: string;
   fecha_entrega: string | null;
   transporte: string | null;
+  /** 'envio' = se despacha a la dirección de entrega; 'retira' = el cliente pasa por el depósito. */
+  modalidad_entrega: ModalidadEntrega;
   fecha_compromiso_pago: string | null;
   despachado: boolean;
   sociedad: string | null;

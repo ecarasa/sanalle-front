@@ -134,6 +134,7 @@ export default function NuevoPedidoWrapper({ initialClienteId }: NuevoPedidoWrap
         initialTipoDocumento={pedido.tipo_documento || 'remito'}
         initialFechaEntrega={pedido.fecha_entrega || null}
         initialObservacion={pedido.observacion || ''}
+        initialModalidadEntrega={pedido.modalidad_entrega}
         initialTipoPrecio={pedido.tipo_precio}
         initialSociedad={pedido.sociedad || 'sanalle'}
         initialReservaStock={pedido.reserva_stock}

@@ -9,7 +9,7 @@ import { parseDate, today, getLocalTimeZone, type DateValue } from '@internation
 import api from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
-import { ClienteDireccion, Deposito, PedidoPlanPago, Producto, User } from '@/types'
+import { ClienteDireccion, Deposito, ModalidadEntrega, PedidoPlanPago, Producto, User } from '@/types'
 import { useAuth } from '@/hooks/useAuth'
 import {
   GRUPO_LABEL,
@@ -110,6 +110,7 @@ interface PedidoFormProps {
   initialFechaEntrega: string | null
   initialObservacion: string
   initialTransporte?: string | null
+  initialModalidadEntrega?: ModalidadEntrega | null
   /** Último transporte del cliente: se propone si el pedido no trae uno. */
   clienteTransporteHabitual?: string | null
   initialDireccionEntrega?: string | null
@@ -151,6 +152,7 @@ export default function PedidoForm({
   initialFechaEntrega,
   initialObservacion,
   initialTransporte,
+  initialModalidadEntrega,
   clienteTransporteHabitual,
   initialDireccionEntrega,
   initialDireccionEntregaId,
@@ -205,6 +207,10 @@ export default function PedidoForm({
   // Sugerencias del combo paramétrico de transportes (tabla `entidades`). El campo
   // sigue siendo texto libre: se puede escribir uno que no esté en la lista.
   const [transportesSugeridos, setTransportesSugeridos] = useState<string[]>([])
+  // Retira por depósito o envío a domicilio. De esto dependen qué dirección sale
+  // impresa en el remito y cuántas copias se emiten.
+  const [modalidadEntrega, setModalidadEntrega] = useState<ModalidadEntrega>(initialModalidadEntrega || 'envio')
+  const esRetiro = modalidadEntrega === 'retira'
 
   // Libreta de direcciones de entrega del cliente.
   const [direcciones, setDirecciones] = useState<ClienteDireccion[]>([])
@@ -490,6 +496,7 @@ export default function PedidoForm({
       fecha: fechaCreacionDate ? fechaCreacionDate.toString() : null,
       observacion: observacion || null,
       transporte: transporte || null,
+      modalidadEntrega,
       direccionEntrega: direccionEntrega || null,
       direccionEntregaId,
       sociedad: sociedad || null,
@@ -524,6 +531,7 @@ export default function PedidoForm({
           observacion: observacion || null,
           fecha: fechaCreacionDate ? fechaCreacionDate.toString() : null,
           transporte: transporte || null,
+          modalidad_entrega: modalidadEntrega,
           direccion_entrega: direccionEntrega || null,
           direccion_entrega_id: direccionEntregaId,
           sociedad: sociedad || null,
@@ -555,6 +563,7 @@ export default function PedidoForm({
     fechaCreacionDate,
     observacion,
     transporte,
+    modalidadEntrega,
     direccionEntrega,
     direccionEntregaId,
     sociedad,
@@ -972,6 +981,7 @@ export default function PedidoForm({
         observacion: observacion || null,
         fecha: fechaCreacionDate ? fechaCreacionDate.toString() : null,
         transporte: transporte || null,
+        modalidad_entrega: modalidadEntrega,
         direccion_entrega: direccionEntrega || null,
         direccion_entrega_id: direccionEntregaId,
         sociedad: sociedad || null,
@@ -1193,19 +1203,52 @@ export default function PedidoForm({
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Transporte</label>
-            <input type="text" list="transportes-sugeridos" value={transporte}
+            <input type="text" list="transportes-sugeridos" value={transporte} disabled={esRetiro}
               onChange={(e) => setTransporte(e.target.value)} placeholder="OCA, propio..."
-              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]" />
+              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] disabled:bg-gray-100 disabled:text-gray-400" />
             <datalist id="transportes-sugeridos">
               {transportesSugeridos.map((t) => <option key={t} value={t} />)}
             </datalist>
-            {clienteTransporteHabitual && transporte === clienteTransporteHabitual && (
+            {esRetiro ? (
+              <p className="text-[11px] text-gray-400 mt-1">No aplica: retira por depósito</p>
+            ) : clienteTransporteHabitual && transporte === clienteTransporteHabitual && (
               <p className="text-[11px] text-gray-400 mt-1">El último que usó este cliente</p>
             )}
           </div>
         </div>
 
-        {/* Envío — se elige de la libreta del cliente, o se escribe una suelta */}
+        {/* Modalidad de entrega — define qué remito se imprime y cuántas copias */}
+        <div className="mt-4">
+          <span className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Modalidad de entrega</span>
+          <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
+            {([['envio', 'Envío a domicilio'], ['retira', 'Retira por depósito']] as const).map(([valor, etiqueta]) => (
+              <button
+                key={valor}
+                type="button"
+                onClick={() => setModalidadEntrega(valor)}
+                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                  modalidadEntrega === valor ? 'bg-[#003087] text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {etiqueta}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">
+            {esRetiro
+              ? 'El remito sale en una copia, con el depósito y sin dirección de entrega.'
+              : 'El remito sale en tres copias (original, duplicado y triplicado) para el transporte.'}
+          </p>
+        </div>
+
+        {esRetiro ? (
+          <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50/50 p-3">
+            <p className="text-xs text-gray-500">
+              Retira por depósito: no se carga dirección de entrega. Si el pedido ya tenía una, se conserva por si vuelve a ser un envío.
+            </p>
+          </div>
+        ) : (
+        /* Envío — se elige de la libreta del cliente, o se escribe una suelta */
         <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50/50 p-3">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold text-gray-600 uppercase tracking-wide">Dirección de entrega</span>
@@ -1292,6 +1335,7 @@ export default function PedidoForm({
             <p className="text-[11px] text-amber-600 mt-1">El cliente no tiene domicilio/localidad cargados. Cargalos en su ficha para autocompletar.</p>
           )}
         </div>
+        )}
 
         {/* Observación */}
         <div className="mt-4 pt-4 border-t border-gray-50">

@@ -557,8 +557,11 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
       const blobUrl = URL.createObjectURL(blob)
       const pdfWindow = window.open('', '_blank')
       if (pdfWindow) {
+        // El remito de envío sale en tres copias: avisarlo en el título evita la
+        // sorpresa de mandar a imprimir un trabajo de tres páginas.
+        const copias = data.find((p) => p.id === pedidoId)?.modalidad_entrega === 'retira' ? '' : ' — 3 copias'
         pdfWindow.document.write(
-          `<html><head><title>Pedido${sinValores ? ' (Sin Valores)' : ''}</title><style>body{margin:0}</style></head>` +
+          `<html><head><title>Pedido${sinValores ? ' (Sin Valores)' : ''}${copias}</title><style>body{margin:0}</style></head>` +
           `<body><iframe src="${blobUrl}" style="width:100%;height:100vh;border:none;"></iframe></body></html>`
         )
         pdfWindow.document.close()
