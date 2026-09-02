@@ -10,7 +10,7 @@ import {
   Truck as TruckIcon, SlidersHorizontal, Building2, FlaskConical, Settings,
   ShoppingCart, Warehouse, Rocket, MessageSquare, ArrowLeftRight, ClipboardList,
   Store, PackagePlus, FileText, Wallet, Table2, Banknote, HandCoins,
-  ClipboardCheck, TrendingUp, LayoutDashboard, Percent, FileEdit,
+  ClipboardCheck, TrendingUp, LayoutDashboard, Percent, FileEdit, Boxes,
 } from 'lucide-react';
 import { useFeatureFlags } from '@/hooks/useFeatureFlags';
 import { featureKeyForHref } from '@/lib/features';
@@ -90,7 +90,13 @@ export default function Sidebar({ user, onLogout, onChangePassword }: SidebarPro
       return [{ label: null, items: [{ label: 'Logística', href: '/dashboard/entregas', icon: TruckIcon }] }];
     }
     if (isOperaciones) {
-      return [{ label: null, items: [{ label: 'Preparación', href: '/dashboard/preparacion', icon: ClipboardCheck }] }];
+      return [{
+        label: null,
+        items: [
+          { label: 'Preparación', href: '/dashboard/preparacion', icon: ClipboardCheck },
+          { label: 'Stock', href: '/dashboard/stock', icon: Boxes },
+        ],
+      }];
     }
     const clientesHref = hasAdminAccess ? '/dashboard/admin/clientes' : '/dashboard/clientes';
     const productosHref = hasAdminAccess ? '/dashboard/admin/productos' : '/dashboard/stock';
@@ -112,7 +118,13 @@ export default function Sidebar({ user, onLogout, onChangePassword }: SidebarPro
             : [{ label: 'Mis Ventas', href: '/dashboard/mis-ventas', icon: TrendingUp }]),
         ],
       },
-      { label: 'Catálogo', items: [{ label: 'Productos', href: productosHref, icon: Package }] },
+      {
+        label: 'Catálogo',
+        items: [
+          { label: 'Productos', href: productosHref, icon: Package },
+          ...(hasAdminAccess ? [{ label: 'Stock', href: '/dashboard/stock', icon: Boxes }] : []),
+        ],
+      },
     ];
 
     if (hasAdminAccess) {

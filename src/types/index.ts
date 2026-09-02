@@ -189,6 +189,60 @@ export interface StockDeposito {
   reservado_total_blisters: number;
 }
 
+/** Recuento físico de un depósito. */
+export interface TomaInventario {
+  id: number;
+  numero: string;
+  deposito_id: number;
+  deposito_nombre: string | null;
+  estado: 'borrador' | 'aplicada' | 'anulada';
+  origen: string;
+  fecha: string;
+  observacion: string | null;
+  creado_por_nombre: string | null;
+  aplicado_por_nombre: string | null;
+  aplicada_at: string | null;
+  created_at: string;
+  resumen?: TomaInventarioResumen | null;
+  total_lineas?: number;
+}
+
+export interface TomaInventarioResumen {
+  lineas: number;
+  contadas: number;
+  con_diferencia: number;
+  delta_positivo_blisters: number;
+  delta_negativo_blisters: number;
+  movidas_durante_conteo: number;
+}
+
+export interface TomaInventarioLinea {
+  producto_id: number;
+  producto_codigo: string | null;
+  producto_nombre: string | null;
+  blisters_por_caja: number | null;
+  esperado_cajas: number;
+  esperado_blisters: number;
+  contado_cajas: number | null;
+  contado_blisters: number | null;
+  actual_cajas: number;
+  actual_blisters: number;
+  reservado_cajas: number;
+  diferencia_blisters: number | null;
+  movido_durante_conteo: boolean;
+}
+
+/** Motivo tipificado de un ajuste de stock. Lo sirve GET /stock/motivos-ajuste. */
+export interface MotivoAjuste {
+  codigo: string;
+  label: string;
+  /** true = es pérdida de mercadería (rotura, vencido, faltante). */
+  es_merma: boolean;
+}
+
+/** Color del semáforo de stock. null = el producto no tiene mínimo configurado. */
+export type SemaforoStock = 'rojo' | 'amarillo' | 'verde' | null;
+
 export interface Producto {
   id: number;
   codigo: string;
@@ -196,6 +250,12 @@ export interface Producto {
   foto_url: string | null;
   // Stock por depósito: una entrada por depósito donde el producto tuvo movimiento.
   stocks: StockDeposito[];
+  // Totales de los depósitos activos y semáforo, calculados por el backend
+  // (`stock_service`), que es donde vive la única definición de "cuánto hay".
+  stock_total_cajas: number;
+  stock_total_blisters: number;
+  stock_minimo_blisters_total: number;
+  semaforo_stock: SemaforoStock;
   // Mínimos
   stock_minimo_cajas: number;
   stock_minimo_blisters: number;
@@ -587,7 +647,15 @@ export interface DashboardAdmin {
   top_stock: { nombre: string; stock: number }[];
   tipos_pago: { tipo: string; cantidad: number; total: number }[];
   top_vendedores: { vendedor: string; total: number; pedidos: number }[];
-  stock_bajo: { id: number; nombre: string; codigo: string; stock: number; stock_minimo_cajas: number }[];
+  stock_bajo: {
+    id: number; nombre: string; codigo: string;
+    stock: number; stock_minimo: number;
+    /** "3 caja(s) + 2 blíster(s)": el número en cajas solo miente si el mínimo es fraccionario. */
+    stock_texto: string; stock_minimo_texto: string;
+    semaforo: SemaforoStock;
+  }[];
+  /** Total real de productos bajo mínimo: `stock_bajo` viene capado a 20. */
+  stock_bajo_total: number;
   ultimos_pagos: { numero_recibo: string; importe: number; tipo_pago: string; estado: string; fecha: string }[];
   pagos_pendientes_imputacion: number;
   clientes_en_rojo: number;

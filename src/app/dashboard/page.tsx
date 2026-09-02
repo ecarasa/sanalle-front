@@ -3,6 +3,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { DollarSign, Package, Users, CreditCard, ClipboardList, FileText, ChevronLeft, ChevronRight, AlertTriangle, UserX, PackageX, Construction, ShoppingCart, HandCoins } from 'lucide-react'
 import api from '@/lib/api'
+import Link from 'next/link'
+import SemaforoStockBadge from '@/components/stock/SemaforoStockBadge'
 import { DashboardVentas, DashboardAdmin } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { rangoDePeriodo } from '@/lib/periodos'
@@ -325,7 +327,9 @@ function AdminDashboard({ mes, desde, hasta, onLoadingChange }: { mes: string; d
 
         {/* Productos con Stock Bajo */}
         {(() => {
-          const totalStockBajo = data.stock_bajo.length
+          // El total real: `stock_bajo` viene capado a 20 desde el backend, así
+          // que su largo mentía en cuanto había más productos que eso.
+          const totalStockBajo = data.stock_bajo_total ?? data.stock_bajo.length
           const totalPages = Math.max(1, Math.ceil(totalStockBajo / STOCK_BAJO_PAGE_SIZE))
           const safePageNum = Math.min(stockBajoPage, totalPages)
           const startIdx = (safePageNum - 1) * STOCK_BAJO_PAGE_SIZE
@@ -335,7 +339,12 @@ function AdminDashboard({ mes, desde, hasta, onLoadingChange }: { mes: string; d
               <div className="flex items-center justify-between mb-4">
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-800 before:h-4 before:w-1 before:rounded-full before:bg-gradient-to-b before:from-[#E31837] before:to-[#A0112A] before:content-['']">Productos con Stock Bajo</h3>
                 {totalStockBajo > 0 && (
-                  <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-600">{totalStockBajo} productos</span>
+                  <Link
+                    href="/dashboard/stock?semaforo_stock=rojo"
+                    className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-600 hover:bg-red-100"
+                  >
+                    {totalStockBajo} productos
+                  </Link>
                 )}
               </div>
               <div className="overflow-x-auto">
@@ -345,6 +354,7 @@ function AdminDashboard({ mes, desde, hasta, onLoadingChange }: { mes: string; d
                       <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Codigo</th>
                       <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Nombre</th>
                       <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Stock</th>
+                      <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Mínimo</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -353,10 +363,11 @@ function AdminDashboard({ mes, desde, hasta, onLoadingChange }: { mes: string; d
                         <td className="px-3 py-2 text-gray-600 font-mono text-xs">{p.codigo}</td>
                         <td className="px-3 py-2 text-gray-700">{p.nombre}</td>
                         <td className="px-3 py-2 text-right">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">
-                            {p.stock}
-                          </span>
+                          <SemaforoStockBadge semaforo={p.semaforo} minimo={p.stock_minimo}>
+                            {p.stock_texto ?? p.stock}
+                          </SemaforoStockBadge>
                         </td>
+                        <td className="px-3 py-2 text-right text-xs text-gray-500">{p.stock_minimo_texto ?? p.stock_minimo}</td>
                       </tr>
                     ))}
                   </tbody>

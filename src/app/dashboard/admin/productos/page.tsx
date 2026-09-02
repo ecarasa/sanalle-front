@@ -10,6 +10,7 @@ import { useFeatureFlags } from '@/hooks/useFeatureFlags'
 import { useDebounce } from '@/hooks/useDebounce'
 import DataGrid from '@/components/grilla/DataGrid'
 import ProductoModal from '@/components/admin/ProductoModal'
+import OperacionStockModal from '@/components/stock/OperacionStockModal'
 import ProductoHistorialModal from '@/components/admin/ProductoHistorialModal'
 import ScraperLogsModal from '@/components/admin/ScraperLogsModal'
 import ListasPublicasModal from '@/components/admin/ListasPublicasModal'
@@ -68,11 +69,6 @@ export default function AdminProductosPage() {
   // Ajuste manual de stock (+/-, sin venta ni compra): habilitado para admin y
   // super_admin. Otros roles pueden habilitarse con el flag ajuste_stock_manual.
   const canManualAdjust = user?.rol === 'super_admin' || user?.rol === 'admin' || isEnabled('ajuste_stock_manual')
-  // Fraccionar dejó de ser una operación: el stock se guarda en blísters y se
-  // re-expresa en cajas + sueltos solo, así que romper una caja no cambia nada.
-  const stockOps: Array<'transfer' | 'manual'> = canManualAdjust
-    ? ['manual', 'transfer']
-    : ['transfer']
   // Estado inicial restaurado de la sesión, para volver donde estabas al navegar.
   const savedState = useMemo(() => {
     if (typeof window === 'undefined') return {} as Record<string, unknown>
@@ -113,14 +109,8 @@ export default function AdminProductosPage() {
   const [listasPublicasOpen, setListasPublicasOpen] = useState(false)
 
   const [stockModal, setStockModal] = useState<Producto | null>(null)
-  const [stockAdjustOp, setStockAdjustOp] = useState<'transfer' | 'manual'>('manual')
   const [depositos, setDepositos] = useState<Deposito[]>([])
   // Depósito sobre el que opera el ajuste, o el origen de la transferencia.
-  const [stockAdjustDepositoId, setStockAdjustDepositoId] = useState<number | null>(null)
-  const [stockAdjustDestinoId, setStockAdjustDestinoId] = useState<number | null>(null)
-  const [stockAdjustCajas, setStockAdjustCajas] = useState('')
-  const [stockAdjustBlisters, setStockAdjustBlisters] = useState('')
-  const [adjusting, setAdjusting] = useState(false)
 
   const [bulkPriceModal, setBulkPriceModal] = useState(false)
   const [bulkPriceTab, setBulkPriceTab] = useState<'porcentaje' | 'alfabeta'>('porcentaje')
@@ -144,11 +134,9 @@ export default function AdminProductosPage() {
 
   // Depósitos para el selector del ajuste de stock
   useEffect(() => {
-    api.get<Deposito[]>('/depositos').then((r) => {
-      const deps = (r.data ?? []).filter((d) => d.activo)
-      setDepositos(deps)
-      setStockAdjustDepositoId((prev) => prev ?? (deps[0]?.id ?? null))
-    }).catch(() => {})
+    api.get<Deposito[]>('/depositos')
+      .then((r) => setDepositos((r.data ?? []).filter((d) => d.activo)))
+      .catch(() => {})
   }, [])
 
   // Configuración general: cuántos días cuenta como "producto nuevo".
@@ -308,47 +296,6 @@ export default function AdminProductosPage() {
       toast.error(error.response?.data?.detail || 'Error al eliminar producto')
     } finally {
       setDeleting(false)
-    }
-  }
-
-  const openStockAdjust = (producto: Producto) => {
-    setStockModal(producto)
-    setStockAdjustOp(canManualAdjust ? 'manual' : 'transfer')
-    // Arranca en el depósito donde el producto ya tiene stock: es el que casi
-    // siempre se quiere ajustar, y evita cargar sobre uno vacío por descuido.
-    const conStock = producto.stocks?.find((st) => st.cajas > 0 || st.blisters > 0)
-    setStockAdjustDepositoId(conStock?.deposito_id ?? depositos[0]?.id ?? null)
-    setStockAdjustDestinoId(null)
-    setStockAdjustCajas('')
-    setStockAdjustBlisters('')
-  }
-
-  const handleStockAdjust = async () => {
-    if (!stockModal) return
-    if (stockAdjustOp === 'manual' && !canManualAdjust) return
-    const cajasAdj = parseInt(stockAdjustCajas) || 0
-    const blistersAdj = parseInt(stockAdjustBlisters) || 0
-
-    setAdjusting(true)
-    try {
-      const payload = {
-        tipo_operacion: stockAdjustOp === 'manual' ? 'ADJUST' : 'TRANSFER',
-        deposito_id: stockAdjustDepositoId,
-        deposito_destino_id: stockAdjustOp === 'transfer' ? stockAdjustDestinoId : null,
-        cantidad_cajas: cajasAdj,
-        cantidad_blisters: blistersAdj,
-        observacion: stockAdjustOp === 'manual' ? 'Ajuste manual de stock' : 'Transferencia entre depósitos',
-      }
-
-      await api.post(`/productos/${stockModal.id}/operacion-stock`, payload)
-      toast.success('Operación registrada correctamente')
-      setStockModal(null)
-      fetchAll()
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } }
-      toast.error(error.response?.data?.detail || 'Error en la operación')
-    } finally {
-      setAdjusting(false)
     }
   }
 
@@ -731,7 +678,7 @@ export default function AdminProductosPage() {
           </button>
           <button
             type="button"
-            onClick={() => openStockAdjust(row)}
+            onClick={() => setStockModal(row)}
             className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-[#00AEEF] bg-[#00AEEF]/10 rounded-lg hover:bg-[#00AEEF]/20 transition-colors"
             title="Ajuste Stock"
           >
@@ -930,155 +877,14 @@ export default function AdminProductosPage() {
 
       <ListasPublicasModal open={listasPublicasOpen} onClose={() => setListasPublicasOpen(false)} />
 
-      {/* Stock Adjustment Modal */}      {stockModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setStockModal(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="flex items-center justify-between p-6 border-b border-gray-100">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-[#00AEEF]/10">
-                  <ArrowUpDown className="w-5 h-5 text-[#00AEEF]" />
-                </div>
-                <h2 className="text-lg font-bold text-gray-900">Operación de Stock</h2>
-              </div>
-              <button type="button" onClick={() => setStockModal(null)} className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
-                <X className="w-5 h-5 text-gray-400" />
-              </button>
-            </div>
-
-            {/* Tabs */}
-            <div className="flex border-b border-gray-100">
-              {stockOps.map((op) => (
-                <button
-                  key={op}
-                  onClick={() => {
-                    setStockAdjustOp(op)
-                    setStockAdjustCajas('')
-                    setStockAdjustBlisters('')
-                  }}
-                  className={`flex-1 py-3 text-xs font-bold uppercase transition-colors ${stockAdjustOp === op
-                    ? 'text-[#00AEEF] border-b-2 border-[#00AEEF]'
-                    : 'text-gray-400 hover:text-gray-600'
-                    }`}
-                >
-                  {op === 'transfer' ? 'Transferir' : 'Ajuste'}
-                </button>
-              ))}
-            </div>
-
-            <div className="p-6 space-y-5">
-              {/* Producto info */}
-              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                <p className="text-sm font-bold text-gray-800">{stockModal.nombre}</p>
-                <div className="flex justify-between items-center mt-1">
-                  <p className="text-xs text-gray-500">{stockModal.codigo}</p>
-                  <p className="text-xs font-medium text-[#003087]">1 caja = {stockModal.blisters_por_caja || '?'} blisters</p>
-                </div>
-              </div>
-
-              {/* Stock actual por depósito: el contexto de cualquier operación. */}
-              <div className="grid grid-cols-2 gap-2">
-                {depositos.map((dep) => {
-                  const st = stockModal.stocks?.find((x) => x.deposito_id === dep.id)
-                  const sel = stockAdjustDepositoId === dep.id
-                  return (
-                    <button
-                      key={dep.id}
-                      onClick={() => setStockAdjustDepositoId(dep.id)}
-                      className={`p-3 rounded-xl border-2 text-left transition-all ${sel ? 'border-[#00AEEF] bg-[#00AEEF]/5' : 'border-gray-100 bg-white hover:border-gray-200'}`}
-                    >
-                      <p className="text-[10px] font-black uppercase text-gray-400 truncate">{dep.nombre}</p>
-                      <p className="text-xs font-bold">{st?.cajas ?? 0} cj + {st?.blisters ?? 0} bl</p>
-                      {(st?.reservado_cajas || st?.reservado_blisters) ? (
-                        <p className="text-[10px] text-amber-600 mt-0.5">
-                          {st.reservado_cajas} cj + {st.reservado_blisters} bl reservados
-                        </p>
-                      ) : null}
-                    </button>
-                  )
-                })}
-              </div>
-
-              {stockAdjustOp === 'transfer' && (
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-gray-400 mb-1">Mover hacia</label>
-                  <select
-                    value={stockAdjustDestinoId ?? ''}
-                    onChange={(e) => setStockAdjustDestinoId(e.target.value ? Number(e.target.value) : null)}
-                    className="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold"
-                  >
-                    <option value="">Elegí el depósito destino</option>
-                    {depositos
-                      .filter((d) => d.id !== stockAdjustDepositoId)
-                      .map((d) => (
-                        <option key={d.id} value={d.id}>{d.nombre}</option>
-                      ))}
-                  </select>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Cajas {stockAdjustOp === 'manual' ? '(+/-)' : 'a mover'}
-                  </label>
-                  <input
-                    type="number"
-                    min={stockAdjustOp === 'manual' ? undefined : 0}
-                    value={stockAdjustCajas}
-                    onChange={(e) => setStockAdjustCajas(e.target.value)}
-                    placeholder="0"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-center font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Blisters {stockAdjustOp === 'manual' ? '(+/-)' : 'a mover'}
-                  </label>
-                  <input
-                    type="number"
-                    min={stockAdjustOp === 'manual' ? undefined : 0}
-                    value={stockAdjustBlisters}
-                    onChange={(e) => setStockAdjustBlisters(e.target.value)}
-                    placeholder="0"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-center font-bold"
-                  />
-                </div>
-              </div>
-
-              {stockAdjustOp === 'manual' && (
-                <p className="text-[10px] text-red-500 italic text-center">
-                  Precaución: el ajuste manual solo debe usarse para correcciones de inventario físico.
-                  Usá números negativos para descontar.
-                </p>
-              )}
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setStockModal(null)}
-                  className="px-6 py-2 text-sm font-bold text-gray-500 hover:bg-gray-100 rounded-xl transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleStockAdjust}
-                  disabled={
-                    adjusting ||
-                    !stockAdjustDepositoId ||
-                    (!stockAdjustCajas && !stockAdjustBlisters) ||
-                    (stockAdjustOp === 'transfer' && !stockAdjustDestinoId)
-                  }
-                  className="inline-flex items-center gap-2 px-6 py-2 text-sm font-bold text-white bg-[#00AEEF] rounded-xl hover:bg-[#0098d4] shadow-lg shadow-[#00AEEF]/20 transition-all active:scale-95 disabled:opacity-50"
-                >
-                  {adjusting && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {stockAdjustOp === 'transfer' ? 'Confirmar Transferencia' : 'Aplicar Ajuste'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {stockModal && (
+        <OperacionStockModal
+          producto={stockModal}
+          depositos={depositos}
+          operaciones={canManualAdjust ? ['ajuste', 'fijar', 'transferir'] : ['transferir']}
+          onClose={() => setStockModal(null)}
+          onDone={fetchAll}
+        />
       )}
 
       {/* Delete Confirmation Modal */}

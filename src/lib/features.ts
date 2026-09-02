@@ -43,7 +43,7 @@ export const FEATURES: FeatureDef[] = [
     key: 'ajuste_stock_manual',
     label: 'Ajuste manual de stock',
     grupo: 'Administración',
-    descripcion: 'Pestaña "Ajuste" (+/-) en Operación de Stock de Gestión de Productos. Para carga inicial o correcciones de inventario.',
+    descripcion: 'Pestañas "Ajuste" y "Fijar cantidad" en Operación de Stock. Sólo tiene efecto para administración y depósito: el resto recibe 403 del servidor aunque el flag esté prendido.',
     defaultEnabled: false,
   },
 ];

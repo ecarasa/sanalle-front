@@ -1,30 +1,33 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Package } from 'lucide-react'
+import { useSearchParams } from 'next/navigation'
+import { ArrowUpDown, Package } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useAuth } from '@/hooks/useAuth'
 import DataGrid from '@/components/grilla/DataGrid'
-import { Deposito, Producto, PaginatedResponse } from '@/types'
+import SemaforoStockBadge from '@/components/stock/SemaforoStockBadge'
+import OperacionStockModal from '@/components/stock/OperacionStockModal'
+import { Deposito, Producto, PaginatedResponse, SemaforoStock } from '@/types'
 
-function StockBadge({ stock }: { stock: number }) {
-  let colorClass = 'bg-red-100 text-red-700'
-  if (stock > 20) {
-    colorClass = 'bg-green-100 text-green-700'
-  } else if (stock >= 5) {
-    colorClass = 'bg-amber-100 text-amber-700'
-  }
-  return (
-    <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${colorClass}`}
-    >
-      {stock}
-    </span>
-  )
+type FiltroSemaforo = 'rojo' | 'amarillo' | 'verde' | 'sin_minimo' | null
+
+interface ResumenSemaforo {
+  rojo: number
+  amarillo: number
+  verde: number
+  sin_minimo: number
 }
+
+const CHIPS: { valor: Exclude<FiltroSemaforo, null>; label: string; clase: string }[] = [
+  { valor: 'rojo', label: 'Bajo mínimo', clase: 'bg-red-100 text-red-700 ring-red-300' },
+  { valor: 'amarillo', label: 'En alerta', clase: 'bg-amber-100 text-amber-700 ring-amber-300' },
+  { valor: 'verde', label: 'OK', clase: 'bg-green-100 text-green-700 ring-green-300' },
+  { valor: 'sin_minimo', label: 'Sin mínimo', clase: 'bg-gray-100 text-gray-600 ring-gray-300' },
+]
 
 export default function StockPage() {
   const { user } = useAuth()
@@ -36,6 +39,14 @@ export default function StockPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [depositos, setDepositos] = useState<Deposito[]>([])
+  // Arranca filtrado si se llegó desde el widget "Stock bajo" del dashboard.
+  const searchParams = useSearchParams()
+  const [semaforo, setSemaforo] = useState<FiltroSemaforo>(
+    (searchParams.get('semaforo_stock') as FiltroSemaforo) || null
+  )
+  const [resumen, setResumen] = useState<ResumenSemaforo | null>(null)
+  const [productoAjuste, setProductoAjuste] = useState<Producto | null>(null)
+  const [depositoAjuste, setDepositoAjuste] = useState<number | null>(null)
 
   const debouncedSearch = useDebounce(search, 400)
 
@@ -45,19 +56,29 @@ export default function StockPage() {
   const fetchProductos = useCallback(async () => {
     setLoading(true)
     try {
-      const params: Record<string, string | number> = { search: debouncedSearch, page, page_size: pageSize }
+      const params: Record<string, string | number | boolean> = {
+        search: debouncedSearch,
+        page,
+        page_size: pageSize,
+        incluir_resumen_semaforo: true,
+      }
+      if (semaforo) params.semaforo_stock = semaforo
       if (Object.keys(columnFilters).length > 0) {
         params.filters = JSON.stringify(columnFilters)
       }
-      const res = await api.get<PaginatedResponse<Producto>>('/productos', { params })
+      const res = await api.get<PaginatedResponse<Producto> & { resumen_semaforo?: ResumenSemaforo }>(
+        '/productos',
+        { params }
+      )
       setData(res.data.items)
       setTotal(res.data.total)
+      if (res.data.resumen_semaforo) setResumen(res.data.resumen_semaforo)
     } catch {
       toast.error('Error al cargar productos')
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, page, pageSize, columnFilters])
+  }, [debouncedSearch, page, pageSize, columnFilters, semaforo])
 
   useEffect(() => {
     fetchProductos()
@@ -112,6 +133,27 @@ export default function StockPage() {
       toast.error('Error al exportar')
     }
   }, [debouncedSearch])
+
+  // El mínimo se edita en la grilla porque cargarlo de a uno abriendo la ficha de
+  // cada producto no es viable: hoy está en cero en todo el catálogo.
+  const guardarMinimo = useCallback(async (row: Producto, valor: string) => {
+    const cajas = parseInt(valor, 10) || 0
+    if (cajas === row.stock_minimo_cajas) return
+    try {
+      await api.post('/stock/minimos-bulk', {
+        items: [{
+          producto_id: row.id,
+          stock_minimo_cajas: cajas,
+          // Se conserva: mandar 0 borraba el mínimo fraccionario de los productos
+          // que se venden por blíster, que es justo para los que existe.
+          stock_minimo_blisters: row.stock_minimo_blisters ?? 0,
+        }],
+      })
+      fetchProductos()
+    } catch {
+      toast.error('No se pudo guardar el mínimo')
+    }
+  }, [fetchProductos])
 
   const columns = useMemo(() => [
     {
@@ -193,7 +235,17 @@ export default function StockPage() {
         const reservado = st?.reservado_cajas ?? 0
         return (
           <div className="flex items-center gap-1.5">
-            <StockBadge stock={st?.cajas ?? 0} />
+            {/* Neutro a propósito: el mínimo es del producto, no del depósito;
+                pintar cada depósito contra el mínimo global sería mentir. */}
+            <button
+              type="button"
+              disabled={isVentas}
+              onClick={() => { setProductoAjuste(row); setDepositoAjuste(dep.id) }}
+              title={isVentas ? undefined : `Corregir el stock en ${dep.nombre}`}
+              className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 enabled:hover:bg-[#00AEEF]/15 enabled:hover:text-[#003087]"
+            >
+              {st?.cajas ?? 0}
+            </button>
             {(st?.blisters ?? 0) > 0 && (
               <span className="text-[10px] text-gray-500">+{st?.blisters}bl</span>
             )}
@@ -213,11 +265,39 @@ export default function StockPage() {
       filterable: true,
       filterType: 'number' as const,
       render: (_value: unknown, row: Producto) => (
-        <span className="font-semibold text-gray-900">
-          {(row.stocks ?? []).reduce((acc, st) => acc + st.cajas, 0)}
+        <span className="inline-flex items-center gap-1.5">
+          <SemaforoStockBadge semaforo={row.semaforo_stock} minimo={row.stock_minimo_cajas}>
+            {row.stock_total_cajas}
+          </SemaforoStockBadge>
+          {row.stock_minimo_cajas > 0 && (
+            <span className="text-[10px] text-gray-400">mín {row.stock_minimo_cajas}</span>
+          )}
         </span>
       ),
     },
+    ...(isAdmin
+      ? [
+        {
+          key: 'stock_minimo_cajas',
+          label: 'Mínimo',
+          sortable: true,
+          filterable: true,
+          filterType: 'number' as const,
+          render: (_value: unknown, row: Producto) => (
+            <input
+              type="number"
+              min={0}
+              defaultValue={row.stock_minimo_cajas || ''}
+              placeholder="0"
+              onClick={(e) => e.stopPropagation()}
+              onBlur={(e) => guardarMinimo(row, e.target.value)}
+              title="Mínimo de reposición, en cajas"
+              className="w-16 px-1.5 py-1 text-sm text-right border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20"
+            />
+          ),
+        },
+      ]
+      : []),
     {
       key: 'precio_venta_minorista',
       label: 'Precio Minorista',
@@ -274,29 +354,49 @@ export default function StockPage() {
           label: 'Acciones',
           stickyRight: true,
           sortable: false,
-          render: (_value: unknown, _row: Producto) => (
-            <span className="text-xs text-gray-400">-</span>
+          render: (_value: unknown, row: Producto) => (
+            <button
+              type="button"
+              onClick={() => { setProductoAjuste(row); setDepositoAjuste(null) }}
+              title="Ajustar stock"
+              className="p-1.5 rounded-lg text-[#003087] hover:bg-[#003087]/10"
+            >
+              <ArrowUpDown className="w-4 h-4" />
+            </button>
           ),
         },
       ]
       : []),
-  ], [isVentas, isAdmin, depositos])
+  ], [isVentas, isAdmin, depositos, guardarMinimo])
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">
-            Stock / Productos
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {isVentas
-              ? 'Consulta de stock y productos (solo lectura)'
-              : 'Gesti\u00F3n de stock y productos'}
-          </p>
+      {/* Semáforo: contador por color y filtro rápido */}
+      {resumen && (
+        <div className="flex flex-wrap items-center gap-2">
+          {CHIPS.map((chip) => {
+            const activo = semaforo === chip.valor
+            return (
+              <button
+                key={chip.valor}
+                type="button"
+                onClick={() => { setSemaforo(activo ? null : chip.valor); setPage(1) }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition ${chip.clase} ${
+                  activo ? 'ring-2' : 'ring-1 ring-transparent opacity-80 hover:opacity-100'
+                }`}
+              >
+                {chip.label}
+                <span className="font-bold">{resumen[chip.valor]}</span>
+              </button>
+            )
+          })}
+          {resumen.rojo + resumen.amarillo + resumen.verde === 0 && (
+            <span className="text-xs text-gray-400">
+              Ningún producto tiene mínimo configurado: el semáforo no puede pintar nada todavía.
+            </span>
+          )}
         </div>
-      </div>
+      )}
 
       {/* DataGrid */}
       <DataGrid
@@ -314,15 +414,20 @@ export default function StockPage() {
         onExport={handleExport}
         searchPlaceholder="Buscar por código, nombre, categoría..."
         storageKey="stock-grid-columns"
-        rowClassName={(row: Producto) => {
-          const stockMinimo = row.stock_minimo_cajas
-          const totalCajas = (row.stocks ?? []).reduce((acc, st) => acc + st.cajas, 0)
-          if (stockMinimo && stockMinimo > 0 && totalCajas <= stockMinimo) {
-            return 'bg-red-50'
-          }
-          return ''
-        }}
+        rowClassName={(row: Producto) =>
+          row.semaforo_stock === 'rojo' ? 'bg-red-50' : row.semaforo_stock === 'amarillo' ? 'bg-amber-50' : ''
+        }
       />
+
+      {productoAjuste && (
+        <OperacionStockModal
+          producto={productoAjuste}
+          depositos={depositos}
+          depositoInicial={depositoAjuste}
+          onClose={() => { setProductoAjuste(null); setDepositoAjuste(null) }}
+          onDone={fetchProductos}
+        />
+      )}
     </div>
   )
 }

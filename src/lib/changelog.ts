@@ -21,9 +21,31 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: 'v4',
+    fecha: '2026-09-02',
+    estado: 'en_curso',
+    titulo: 'Remitos por modalidad de entrega y solapa de Stock con ajustes e inventario',
+    cambios: [
+      { area: 'Remitos', detalle: 'El remito que se le entrega al cliente ya no lleva el nombre del sistema: se sacaron la banda superior, el bloque de marca y el pie. La hoja de ruta y la orden de compra, que son internas, lo conservan.' },
+      { area: 'Remitos', detalle: 'Se eliminaron el CUIT y el domicilio de ejemplo que salían impresos en los recibos de pago.' },
+      { area: 'Pedidos', detalle: 'Modalidad de entrega por pedido: "Retira por depósito" o "Envío a domicilio". Se propone sola según cómo suele operar el cliente y se puede cambiar.' },
+      { area: 'Remitos', detalle: 'El remito de envío sale en 3 copias rotuladas ORIGINAL / DUPLICADO / TRIPLICADO, con la dirección de entrega del pedido (antes salía siempre el domicilio fiscal), transporte y bultos. El de retiro sale en 1 copia con el depósito.' },
+      { area: 'Remitos', detalle: 'Los dos remitos suman al pie un recuadro "Recibí conforme" con firma, aclaración, DNI y fecha.' },
+      { area: 'Stock', detalle: 'Semáforo de stock crítico contra el mínimo de cada producto: rojo en o bajo el mínimo, amarillo cerca, verde arriba. Con contador por color y filtro rápido.' },
+      { area: 'Stock', detalle: 'Nueva solapa Stock (Catálogo → Stock) con cuatro pestañas: Existencias, Movimientos, Inventarios y Carga masiva. Antes la pantalla existía pero no había forma de llegar desde el menú.' },
+      { area: 'Stock', detalle: 'Ajustes de stock desde la propia grilla, sin cargar una compra ni un producto nuevo. Cada ajuste pide un motivo (recuento físico, rotura, vencido, faltante, error de carga) y queda registrado con usuario y fecha.' },
+      { area: 'Stock', detalle: 'Toma de inventario por depósito: se congela lo que el sistema cree tener, se cargan las cantidades contadas con guardado automático y se aplican todas las diferencias juntas. Avisa si algún producto se movió durante el conteo.' },
+      { area: 'Stock', detalle: 'Carga masiva por planilla para arrancar con un depósito ya cargado, y planilla para configurar los mínimos. Si la planilla tiene un error se avisa y no se aplica nada.' },
+      { area: 'Stock', detalle: 'El mínimo de reposición se edita directo en la grilla y se puede importar por Excel.' },
+      { area: 'Stock', detalle: 'Corregido: el widget "Stock bajo" del panel contaba el stock de depósitos dados de baja, así que tapaba productos que había que reponer. Además mostraba como total los primeros 20 nada más.' },
+      { area: 'Sistema', detalle: 'Corregido: la importación de productos por Excel cambiaba existencias sin dejar movimiento. Era la única entrada de stock sin auditoría.' },
+      { area: 'Sistema', detalle: 'Corregido: el ajuste de stock por API sólo pedía estar logueado. Ahora exige rol de administración o depósito.' },
+    ],
+  },
+  {
     version: 'v3',
     fecha: '2026-08-11',
-    estado: 'en_curso',
+    estado: 'publicado',
     titulo: 'Mejoras de módulos: filtros, herramientas comerciales y novedades',
     cambios: [
       { area: 'Clientes', detalle: 'Se arregló el filtro de localidad y de zona (antes no filtraba: traía todos los clientes).' },
