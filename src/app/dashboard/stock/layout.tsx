@@ -14,6 +14,7 @@ import { useAuth } from '@/hooks/useAuth'
 const PESTANAS = [
   { href: '/dashboard/stock', label: 'Existencias', soloEscritura: false },
   { href: '/dashboard/stock/movimientos', label: 'Movimientos', soloEscritura: false },
+  { href: '/dashboard/stock/cambios', label: 'Cambios', soloEscritura: false },
   { href: '/dashboard/stock/inventarios', label: 'Inventarios', soloEscritura: true },
   { href: '/dashboard/stock/importar', label: 'Carga masiva', soloEscritura: true },
 ]
