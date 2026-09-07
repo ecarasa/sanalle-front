@@ -53,8 +53,6 @@ export default function CuentasPage() {
   const [editing, setEditing] = useState<Cuenta | null>(null)
   const [form, setForm] = useState<FormState>(emptyForm)
   const [saving, setSaving] = useState(false)
-  const [balanceTotal, setBalanceTotal] = useState<number | null>(null)
-  const [balanceLoading, setBalanceLoading] = useState(true)
 
   const fetchCuentas = useCallback(async () => {
     setLoading(true)
@@ -68,19 +66,13 @@ export default function CuentasPage() {
     }
   }, [])
 
-  const fetchBalance = useCallback(async () => {
-    setBalanceLoading(true)
-    try {
-      const res = await api.get<{ total: number }>('/cuenta-sanalle/balance_neto')
-      setBalanceTotal(res.data.total)
-    } catch {
-      setBalanceTotal(null)
-    } finally {
-      setBalanceLoading(false)
-    }
-  }, [])
+  // Lo que suman las cuentas de abajo. Antes acá se mostraba el balance del
+  // "libro de caja" (`cuenta_sanalle`), que se alimenta por otro camino y no está
+  // atado a ninguna cuenta: la tarjeta decía millones mientras las cuentas
+  // sumaban unos pocos miles.
+  const sumaCuentas = cuentas.reduce((acc, c) => acc + (c.balance ?? 0), 0)
 
-  useEffect(() => { fetchCuentas(); fetchBalance() }, [fetchCuentas, fetchBalance])
+  useEffect(() => { fetchCuentas() }, [fetchCuentas])
 
   const openNew = () => { setEditing(null); setForm(emptyForm); setModalOpen(true) }
   const openEdit = (c: Cuenta) => {
@@ -142,14 +134,16 @@ export default function CuentasPage() {
             <TrendingUp className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-white/80">Balance total de la empresa</p>
-            <p className="text-[11px] text-white/60">Ingresos menos egresos de todas las cuentas (Libro Mayor)</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-white/80">Total en cuentas</p>
+            <p className="text-[11px] text-white/60">Suma de los saldos de las cuentas de abajo</p>
           </div>
         </div>
         <div className="text-2xl font-black">
-          {balanceLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : balanceTotal !== null ? formatCurrency(balanceTotal) : '—'}
+          {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : formatCurrency(sumaCuentas)}
         </div>
       </div>
+
+
 
       {loading ? (
         <div className="flex items-center justify-center py-16 text-gray-400"><Loader2 className="w-8 h-8 animate-spin text-[#003087]" /></div>

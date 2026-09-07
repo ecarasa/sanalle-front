@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Plus, Pencil, Trash2, Loader2, Building2, Phone, Mail, MapPin,
   Calendar, CreditCard, ChevronDown, ChevronUp, Banknote, AlertCircle,
-  CheckCircle2, Wallet,
+  CheckCircle2,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
@@ -38,8 +38,6 @@ function PagoProveedorPanel({
   const [descCheck, setDescCheck] = useState(false)
   const [cashbackCheck, setCashbackCheck] = useState(true)
   const [metodoPago, setMetodoPago] = useState('efectivo')
-  const [balance, setBalance] = useState<number | null>(null)
-  const [loadingBalance, setLoadingBalance] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [paying, setPaying] = useState(false)
   const [acreditando, setAcreditando] = useState(false)
@@ -58,19 +56,6 @@ function PagoProveedorPanel({
     }
   }
 
-  const fetchBalance = useCallback(async () => {
-    setLoadingBalance(true)
-    try {
-      const res = await api.get<{ total: number }>('/cuenta-sanalle/balance_neto')
-      setBalance(res.data.total)
-    } catch {
-      setBalance(null)
-    } finally {
-      setLoadingBalance(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchBalance() }, [fetchBalance])
 
   const descPct = descCheck ? descuento : 0
 
@@ -144,7 +129,6 @@ function PagoProveedorPanel({
       setShowConfirm(false)
       setSelected(new Set())
       setMontosParciales({})
-      await fetchBalance()
       onPagado()
     } catch (err: any) {
       toast.error(err.response?.data?.detail || 'Error al registrar el pago')
@@ -211,20 +195,6 @@ function PagoProveedorPanel({
           </select>
         </div>
 
-        {/* Balance badge */}
-        <div className="flex items-center gap-1.5 text-xs font-bold">
-          <Wallet className="w-3.5 h-3.5 text-gray-400" />
-          <span className="text-gray-400">Balance Sanalle:</span>
-          {loadingBalance ? (
-            <Loader2 className="w-3 h-3 animate-spin text-gray-400" />
-          ) : balance === null ? (
-            <span className="text-gray-400">—</span>
-          ) : (
-            <span className={balance > 0 ? 'text-emerald-600' : 'text-red-600'}>
-              {formatCurrency(balance)}
-            </span>
-          )}
-        </div>
       </div>
 
       {/* Cashback acumulado (pendiente de acreditar) */}
@@ -443,15 +413,6 @@ function PagoProveedorPanel({
                   <span className="font-black text-gray-900">Total a pagar</span>
                   <span className="text-2xl font-black text-[#003087]">{formatCurrency(total)}</span>
                 </div>
-              </div>
-
-              {/* Balance info */}
-              <div className="bg-emerald-50 rounded-xl px-4 py-3 flex items-center justify-between text-sm border border-emerald-100">
-                <span className="flex items-center gap-1.5 font-medium text-emerald-700">
-                  <Wallet className="w-4 h-4" />
-                  Balance disponible
-                </span>
-                <span className="font-black text-emerald-700">{formatCurrency(balance ?? 0)}</span>
               </div>
 
               <div className="flex gap-3 pt-2">
