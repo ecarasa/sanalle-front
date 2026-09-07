@@ -542,7 +542,8 @@ export interface IngresoMercaderia {
   saldo_pendiente: number;
   fecha_vencimiento: string | null;
   created_at: string;
-  archivo_url?: string | null;
+  /** Antes era la URL pública; ahora el objeto es privado y sólo se informa si hay adjunto. */
+  tiene_archivo?: boolean;
 }
 
 export interface SolicitudCambioCliente {

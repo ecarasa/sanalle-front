@@ -17,6 +17,7 @@ export default function IngresoDetalleModal({ ingreso, onClose, onUpdate }: Prop
   const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [deletingArchivo, setDeletingArchivo] = useState(false)
+  const [abriendoArchivo, setAbriendoArchivo] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleDownloadPdf = async () => {
@@ -58,6 +59,20 @@ export default function IngresoDetalleModal({ ingreso, onClose, onUpdate }: Prop
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  const handleVerArchivo = async () => {
+    if (!ingreso) return
+    setAbriendoArchivo(true)
+    try {
+      // El archivo es privado: se pide un link temporal en vez de una URL fija.
+      const res = await api.get<{ url: string }>(`/ingresos-mercaderia/${ingreso.id}/archivo`)
+      window.open(res.data.url, '_blank', 'noopener,noreferrer')
+    } catch {
+      toast.error('No se pudo abrir la factura')
+    } finally {
+      setAbriendoArchivo(false)
     }
   }
 
@@ -164,17 +179,17 @@ export default function IngresoDetalleModal({ ingreso, onClose, onUpdate }: Prop
             <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide block mb-3">
               Factura del proveedor
             </span>
-            {ingreso.archivo_url ? (
+            {ingreso.tiene_archivo ? (
               <div className="flex items-center gap-2">
-                <a
-                  href={ingreso.archivo_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors flex-1 min-w-0"
+                <button
+                  type="button"
+                  onClick={handleVerArchivo}
+                  disabled={abriendoArchivo}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors flex-1 min-w-0 disabled:opacity-50"
                 >
                   <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">Ver factura adjunta</span>
-                </a>
+                  <span className="truncate">{abriendoArchivo ? 'Abriendo…' : 'Ver factura adjunta'}</span>
+                </button>
                 <button
                   type="button"
                   onClick={handleDeleteArchivo}
