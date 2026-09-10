@@ -9,7 +9,8 @@ import { parseDate, today, getLocalTimeZone, type DateValue } from '@internation
 import api from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
-import { ClienteDireccion, Deposito, ModalidadEntrega, PedidoPlanPago, Producto, User } from '@/types'
+import { useConfiguracion } from '@/hooks/useConfiguracion'
+import { AvisoStock, ClienteDireccion, Deposito, ModalidadEntrega, PedidoPlanPago, Producto, User } from '@/types'
 import { useAuth } from '@/hooks/useAuth'
 import {
   GRUPO_LABEL,
@@ -120,6 +121,10 @@ interface PedidoFormProps {
   initialFechaCompromisoPago?: string | null
   initialItems: PedidoItemLocal[]
   initialTipoPrecio?: Grupo | null
+  /** Qué clase de venta es, independiente de la lista de precios usada. */
+  initialTipoCliente?: Grupo | null
+  /** False = este pedido no escala solo a mayorista aunque supere el umbral. */
+  initialAplicaUmbralMayorista?: boolean
   /** Plan de cobro del pedido (informativo: no genera pagos). */
   initialPlanPago?: PedidoPlanPago[]
   /** False = el pedido no compromete mercadería (se factura antes del ingreso). */
@@ -160,6 +165,8 @@ export default function PedidoForm({
   initialFechaCompromisoPago,
   initialItems,
   initialTipoPrecio,
+  initialTipoCliente,
+  initialAplicaUmbralMayorista,
   initialPlanPago,
   initialReservaStock,
   shippingStatus,
@@ -201,6 +208,8 @@ export default function PedidoForm({
     return hoy
   })
   const [observacion, setObservacion] = useState(initialObservacion)
+  // Para llevar el foco al campo cuando falta el motivo de una excepción de precio.
+  const observacionRef = useRef<HTMLTextAreaElement>(null)
   // El transporte arranca con el del pedido; si es nuevo, con el último que usó
   // el cliente. Sigue siendo editable y lo que se guarde vuelve a la ficha.
   const [transporte, setTransporte] = useState(initialTransporte || clienteTransporteHabitual || '')
@@ -278,10 +287,31 @@ export default function PedidoForm({
     if (esGrupo(clienteTipo)) return clienteTipo
     return 'minorista'
   })
+  // Qué clase de venta es. Arranca igual que el tipo de precio pero NO lo sigue:
+  // subir la lista a mayorista por volumen no convierte al cliente en mayorista.
+  const [tipoCliente, setTipoCliente] = useState<Grupo>(() => {
+    if (esGrupo(initialTipoCliente)) return initialTipoCliente
+    if (esGrupo(clienteTipo)) return clienteTipo
+    return 'minorista'
+  })
   // Pedido que no compromete mercadería: se usa en operaciones de volumen que se
   // facturan antes de que entre el ingreso del proveedor. Mientras está apagado
   // el form no limita las cantidades por stock, porque la mercadería no entró.
   const [reservaStock, setReservaStock] = useState(initialReservaStock ?? true)
+  // Umbral de escalón a mayorista, configurable en Configuración general.
+  const umbralMayorista = useConfiguracion().numero('umbral_mayorista')
+  // Excepción por pedido: no escalar aunque supere el umbral. Va auditado.
+  const [aplicaUmbral, setAplicaUmbral] = useState(initialAplicaUmbralMayorista ?? true)
+  // Líneas que piden más de lo disponible. En una cotización es un aviso, no un
+  // bloqueo: el backend lo recalcula en cada guardado y lo devuelve acá.
+  const [avisosStock, setAvisosStock] = useState<AvisoStock[]>([])
+  // Alguna línea salió a un precio distinto del de lista. Lo decide el backend
+  // recalculando contra la lista real: acá no se puede, porque cuando el vendedor
+  // pisa el precio a mano el form conserva el `precio_lista` viejo de referencia.
+  const [excepcionPrecio, setExcepcionPrecio] = useState<{ hay: boolean; detalle: string | null }>({
+    hay: false,
+    detalle: null,
+  })
   const [items, setItems] = useState<PedidoItemLocal[]>(initialItems)
   const itemsRef = useRef(items)
   itemsRef.current = items
@@ -503,6 +533,8 @@ export default function PedidoForm({
       deposito_id: depositoId,
       fechaCompromisoPago: fechaCompromisoPago ? fechaCompromisoPago.toString() : null,
       tipo_precio: tipoPrecio,
+      tipo_cliente: tipoCliente,
+      aplica_umbral_mayorista: aplicaUmbral,
       vendedor_id: vendedorId,
       reserva_stock: reservaStock,
       plan_pago: planPago,
@@ -525,7 +557,7 @@ export default function PedidoForm({
       autoSavingRef.current = true
       setAutoSaving(true)
       try {
-        await api.put(`/pedidos/${pedidoId}`, {
+        const res = await api.put(`/pedidos/${pedidoId}`, {
           tipo_documento: tipoDocumento,
           items: itemsPayload,
           observacion: observacion || null,
@@ -538,9 +570,19 @@ export default function PedidoForm({
           deposito_id: depositoId,
           fecha_compromiso_pago: fechaCompromisoPago ? fechaCompromisoPago.toString() : null,
           tipo_precio: tipoPrecio,
+          tipo_cliente: tipoCliente,
+          aplica_umbral_mayorista: aplicaUmbral,
           vendedor_id: vendedorId,
           reserva_stock: reservaStock,
           plan_pago: planPago,
+        })
+        // El backend recalcula el faltante contra el stock real en cada guardado:
+        // es la única fuente confiable, porque el catálogo en memoria del form
+        // puede estar desactualizado si otro vendedor se llevó la mercadería.
+        setAvisosStock(res.data?.avisos_stock ?? [])
+        setExcepcionPrecio({
+          hay: Boolean(res.data?.tiene_excepcion_precio),
+          detalle: res.data?.excepcion_precio_detalle ?? null,
         })
         await refrescarStockDeItems()
       } catch (err) {
@@ -572,6 +614,8 @@ export default function PedidoForm({
     pedidoId,
     vendedorId,
     tipoPrecio,
+    tipoCliente,
+    aplicaUmbral,
     reservaStock,
     planPago,
   ])
@@ -621,10 +665,16 @@ export default function PedidoForm({
     [depositoId, stockEnDeposito]
   )
 
-  // El tope por stock solo aplica cuando el pedido reserva. Un pedido marcado
-  // para no descontar vende mercadería que todavía no entró: el disponible se
-  // sigue mostrando (depósito lo necesita) pero no bloquea la carga.
-  const limitaPorStock = reservaStock
+  // ¿Este pedido tiene mercadería comprometida AHORA? Una cotización (borrador)
+  // no reserva: la reserva se hace al confirmarla. El backend manda el dato en
+  // `reserva_vigente`; acá se deriva del estado por si la respuesta es vieja.
+  const reservaVigente = reservaStock && shippingStatus !== 'borrador'
+
+  // El tope por stock solo aplica cuando el pedido ya reserva. Un pedido marcado
+  // para no descontar vende mercadería que todavía no entró, y una cotización se
+  // arma antes de tener el stock: en los dos casos el disponible se sigue
+  // mostrando (depósito lo necesita) pero no bloquea la carga.
+  const limitaPorStock = reservaVigente
 
   // Depósitos donde este producto sí tiene stock, para poder sugerir el cambio
   // en vez de dejar al vendedor frenado con un "no hay".
@@ -652,17 +702,20 @@ export default function PedidoForm({
   // línea ya tiene reservado en el server: el disponible que ve el form ya lo
   // tiene descontado, así que sin esto subir de 10 a 11 se bloquearía cuando esa
   // línea se llevó el último stock.
+  //
+  // La compensación SOLO vale si la línea realmente reservó. En una cotización
+  // no reservó nada, y sumarla inflaría el disponible al doble.
   const disponibleParaLinea = useCallback(
     (producto: Producto, unidad: UnidadVenta, deposito: number | null, idx: number | null) => {
       const base = getAvailableStock(producto, unidad, deposito)
-      if (idx === null) return base
+      if (idx === null || !reservaVigente) return base
       const original = items[idx]
       if (!original || original.producto_id !== producto.id) return base
       if (original.unidad_venta !== unidad) return base
       if ((original.deposito_id ?? depositoId) !== deposito) return base
       return base + original.cantidad
     },
-    [getAvailableStock, items, depositoId]
+    [getAvailableStock, items, depositoId, reservaVigente]
   )
 
   // Sin stock suficiente para lo que se está tratando de agregar: bloquea el alta.
@@ -703,14 +756,19 @@ export default function PedidoForm({
     [tipoPrecio]
   )
 
-  // Un pedido minorista que supera los $800.000 pasa a mayorista.
+  // Un pedido minorista que supera el umbral pasa a mayorista.
   // Comercio NO se toca: es una lista propia, no un escalón por volumen.
+  // El umbral sale de Configuración general (0 = desactivado) y el pedido puede
+  // quedar exceptuado con `aplicaUmbral`.
   useEffect(() => {
-    if (tipoPrecio === 'minorista' && importeTotal >= 800000) {
+    if (!aplicaUmbral || !(umbralMayorista > 0)) return
+    if (tipoPrecio === 'minorista' && importeTotal >= umbralMayorista) {
       setTipoPrecio('mayorista')
-      toast.success('El pedido superó los $800.000. Se aplicó precio mayorista automáticamente.')
+      toast.success(
+        `El pedido superó los ${formatCurrency(umbralMayorista)}. Se aplicó precio mayorista automáticamente.`
+      )
     }
-  }, [importeTotal, tipoPrecio])
+  }, [importeTotal, tipoPrecio, umbralMayorista, aplicaUmbral])
 
   // Al cambiar el tipo de precio, se reprecian todas las líneas contra la lista nueva.
   // Comparar contra el valor anterior (en vez de un flag de "ya montó") deja el efecto
@@ -972,6 +1030,14 @@ export default function PedidoForm({
       toast.error('Elegí el depósito del que sale el pedido')
       return
     }
+    // Espejo del control del backend, para avisar antes del round-trip. El
+    // control real está allá: acá sólo evita el viaje y lleva el foco al campo.
+    if (shippingStatus === 'borrador' && excepcionPrecio.hay && !observacion.trim()) {
+      toast.error('El pedido tiene precios fuera de lista: cargá una observación explicando la excepción.')
+      observacionRef.current?.focus()
+      observacionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return
+    }
 
     setSaving(true)
     try {
@@ -988,6 +1054,8 @@ export default function PedidoForm({
         deposito_id: depositoId,
         fecha_compromiso_pago: fechaCompromisoPago ? fechaCompromisoPago.toString() : null,
         tipo_precio: tipoPrecio,
+        tipo_cliente: tipoCliente,
+        aplica_umbral_mayorista: aplicaUmbral,
         vendedor_id: vendedorId,
         reserva_stock: reservaStock,
         plan_pago: planPago,
@@ -1001,8 +1069,17 @@ export default function PedidoForm({
       toast.success('Pedido finalizado exitosamente')
       router.push('/dashboard/pedidos')
     } catch (err: unknown) {
+      // El PUT y el PATCH son dos pasos: si el que falló es el segundo (la
+      // confirmación, típicamente por falta de stock) los cambios YA quedaron
+      // guardados y el pedido sigue siendo una cotización. Decirlo así evita que
+      // el vendedor crea que perdió lo que acaba de cargar.
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      toast.error(typeof detail === 'string' ? detail : 'Error al finalizar el pedido')
+      const motivo = typeof detail === 'string' ? detail : 'Error al finalizar el pedido'
+      toast.error(
+        shippingStatus === 'borrador'
+          ? `La cotización se guardó, pero no se pudo confirmar: ${motivo}`
+          : motivo
+      )
     } finally {
       setSaving(false)
     }
@@ -1073,39 +1150,97 @@ export default function PedidoForm({
           </RadioGroup>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">Tipo de Precio</h2>
-            {clienteTipo && (
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-gray-100 text-gray-500 border border-gray-200">
-                Cliente: {clienteTipo}
-              </span>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-5">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">Tipo de Precio</h2>
+              {clienteTipo && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-gray-100 text-gray-500 border border-gray-200">
+                  Cliente: {clienteTipo}
+                </span>
+              )}
+            </div>
+            <RadioGroup
+              value={tipoPrecio}
+              onChange={(val: string) => {
+                if (esGrupo(val)) setTipoPrecio(val)
+              }}
+              orientation="horizontal"
+              className="flex gap-3"
+              aria-label="Tipo de precio"
+            >
+              {GRUPO_OPTIONS.map((tipo) => (
+                <Radio
+                  key={tipo.value}
+                  value={tipo.value}
+                  className={({ isSelected }) =>
+                    `flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-blue-600/50 ${isSelected
+                      ? 'border-blue-600 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                    }`
+                  }
+                >
+                  {tipo.label}
+                </Radio>
+              ))}
+            </RadioGroup>
+          </div>
+
+          {/* Va aparte del precio a propósito: se puede vender a un minorista con
+              precio mayorista por volumen, y para las estadísticas lo que importa
+              es qué clase de cliente compró, no qué columna se usó. */}
+          <div className="border-t border-gray-100 pt-4">
+            <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-3">Tipo de Cliente</h2>
+            <RadioGroup
+              value={tipoCliente}
+              onChange={(val: string) => {
+                if (esGrupo(val)) setTipoCliente(val)
+              }}
+              orientation="horizontal"
+              className="flex gap-3"
+              aria-label="Tipo de cliente"
+            >
+              {GRUPO_OPTIONS.map((tipo) => (
+                <Radio
+                  key={tipo.value}
+                  value={tipo.value}
+                  className={({ isSelected }) =>
+                    `flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-blue-600/50 ${isSelected
+                      ? 'border-slate-700 bg-slate-50 text-slate-800'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                    }`
+                  }
+                >
+                  {tipo.label}
+                </Radio>
+              ))}
+            </RadioGroup>
+            {tipoCliente !== tipoPrecio && (
+              <p className="mt-2 text-xs text-amber-700">
+                Precio {GRUPO_LABEL[tipoPrecio].toLowerCase()} sobre cliente {GRUPO_LABEL[tipoCliente].toLowerCase()}.
+              </p>
             )}
           </div>
-          <RadioGroup
-            value={tipoPrecio}
-            onChange={(val: string) => {
-              if (esGrupo(val)) setTipoPrecio(val)
-            }}
-            orientation="horizontal"
-            className="flex gap-3"
-            aria-label="Tipo de precio"
-          >
-            {GRUPO_OPTIONS.map((tipo) => (
-              <Radio
-                key={tipo.value}
-                value={tipo.value}
-                className={({ isSelected }) =>
-                  `flex-1 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-blue-600/50 ${isSelected
-                    ? 'border-blue-600 bg-blue-50 text-blue-700'
-                    : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                  }`
-                }
-              >
-                {tipo.label}
-              </Radio>
-            ))}
-          </RadioGroup>
+
+          {umbralMayorista > 0 && (
+            <div className="border-t border-gray-100 pt-4">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!aplicaUmbral}
+                  onChange={(e) => setAplicaUmbral(!e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#003087] focus:ring-[#003087]/40"
+                />
+                <span className="text-sm text-gray-700">
+                  No escalar a mayorista automáticamente en este pedido
+                  <span className="block text-xs text-gray-500 mt-0.5">
+                    Por defecto, un pedido minorista que supera {formatCurrency(umbralMayorista)} pasa a
+                    precio mayorista. Tildar acá lo deja en la lista elegida.
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1339,10 +1474,26 @@ export default function PedidoForm({
 
         {/* Observación */}
         <div className="mt-4 pt-4 border-t border-gray-50">
-          <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Observación</label>
-          <textarea value={observacion} onChange={(e) => setObservacion(e.target.value)} rows={2}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] resize-none"
-            placeholder="Observaciones del pedido..." />
+          <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">
+            Observación
+            {excepcionPrecio.hay && <span className="ml-1 text-amber-600 normal-case">(obligatoria)</span>}
+          </label>
+          <textarea ref={observacionRef} value={observacion} onChange={(e) => setObservacion(e.target.value)} rows={2}
+            className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 resize-none ${
+              excepcionPrecio.hay && !observacion.trim()
+                ? 'border-amber-400 focus:ring-amber-400/30 focus:border-amber-500'
+                : 'border-gray-300 focus:ring-[#003087]/20 focus:border-[#003087]'
+            }`}
+            placeholder={excepcionPrecio.hay ? 'Explicá la excepción de precio...' : 'Observaciones del pedido...'} />
+          {excepcionPrecio.hay && (
+            <p className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-700">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+              <span>
+                Hay precios fuera de lista{excepcionPrecio.detalle ? ` — ${excepcionPrecio.detalle}` : ''}.
+                Cargá el motivo antes de confirmar el pedido.
+              </span>
+            </p>
+          )}
         </div>
 
         {/* Pedido que no compromete mercadería */}
@@ -1488,6 +1639,30 @@ export default function PedidoForm({
             Agregar Producto
           </button>
         </div>
+
+        {avisosStock.length > 0 && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-900">
+                  Esta cotización pide más de lo que hay disponible
+                </p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  Se guarda igual. Al confirmarla puede fallar si para ese momento sigue sin haber stock.
+                </p>
+                <ul className="mt-2 space-y-0.5">
+                  {avisosStock.map((a) => (
+                    <li key={`${a.producto_id}-${a.deposito_id}`} className="text-xs text-amber-800">
+                      <span className="font-medium">{a.producto_nombre}</span>
+                      {a.deposito_nombre ? ` en ${a.deposito_nombre}` : ''}: pide {a.pedido}, hay {a.disponible}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
 
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-14 text-center">

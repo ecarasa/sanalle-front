@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Plus, Pencil, Trash2, Loader2, Building2, Phone, Mail, MapPin,
   Calendar, CreditCard, ChevronDown, ChevronUp, Banknote, AlertCircle,
-  CheckCircle2,
+  CheckCircle2, Landmark,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
@@ -556,6 +556,37 @@ export default function AdminProveedoresPage() {
           )}
         </div>
       ),
+    },
+    {
+      key: 'cuentas',
+      label: 'Cuenta',
+      sortable: false,
+      render: (_: any, row: Proveedor) => {
+        const cuentas = row.cuentas ?? []
+        if (cuentas.length === 0) {
+          return <span className="text-[11px] text-gray-300">Sin cuenta</span>
+        }
+        // Se muestra la predeterminada (viene primera del backend) y cuántas más hay.
+        const principal = cuentas[0]
+        return (
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-1.5 text-xs text-gray-700">
+              <Landmark className="w-3 h-3 text-gray-400" />
+              <span className="font-medium">{principal.banco || principal.etiqueta}</span>
+              {cuentas.length > 1 && (
+                <span className="px-1 py-px rounded bg-gray-100 text-[10px] font-bold text-gray-500">
+                  +{cuentas.length - 1}
+                </span>
+              )}
+            </div>
+            {(principal.alias || principal.cbu) && (
+              <div className="text-[11px] text-gray-400 font-mono truncate max-w-[160px]">
+                {principal.alias || principal.cbu}
+              </div>
+            )}
+          </div>
+        )
+      },
     },
     {
       key: 'plazo_pago',

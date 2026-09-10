@@ -115,6 +115,8 @@ export default function EditarPedidoPage() {
       initialSociedad={pedido.sociedad}
       initialFechaCompromisoPago={pedido.fecha_compromiso_pago}
       initialTipoPrecio={pedido.tipo_precio}
+      initialTipoCliente={pedido.tipo_cliente}
+      initialAplicaUmbralMayorista={pedido.aplica_umbral_mayorista}
       initialReservaStock={pedido.reserva_stock}
       initialPlanPago={pedido.plan_pago}
       shippingStatus={pedido.shipping_status}

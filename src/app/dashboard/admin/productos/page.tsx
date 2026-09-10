@@ -7,6 +7,7 @@ import api from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
 import { useFeatureFlags } from '@/hooks/useFeatureFlags'
+import { useConfiguracion } from '@/hooks/useConfiguracion'
 import { useDebounce } from '@/hooks/useDebounce'
 import DataGrid from '@/components/grilla/DataGrid'
 import ProductoModal from '@/components/admin/ProductoModal'
@@ -36,8 +37,10 @@ const DEPO_BADGE_COLORS = [
 ]
 
 function StockDepBadge({ nombre, cajas, blisters, idx }: { nombre: string | null; cajas: number; blisters: number; idx: number }) {
-  const total = cajas + blisters / 100
-  const cls = total > 0 ? DEPO_BADGE_COLORS[idx % DEPO_BADGE_COLORS.length] : 'bg-gray-50 text-gray-400 border-gray-200'
+  // Sin aritmética: el badge sólo necesita saber si hay algo. Convertir blísters
+  // a cajas acá exigiría `blisters_por_caja`, que este componente no recibe.
+  const hay = cajas > 0 || blisters > 0
+  const cls = hay ? DEPO_BADGE_COLORS[idx % DEPO_BADGE_COLORS.length] : 'bg-gray-50 text-gray-400 border-gray-200'
   const short = (nombre || '?').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 3).toUpperCase() || '?'
   return (
     <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-medium ${cls}`} title={nombre ?? undefined}>
@@ -65,6 +68,8 @@ function DualStockCell({ row }: { row: Producto }) {
 export default function AdminProductosPage() {
   const { user } = useAuth()
   const { isEnabled } = useFeatureFlags()
+  // Días para considerar un producto "nuevo" (configurable en Configuración general).
+  const productoNuevoDias = useConfiguracion().numero('producto_nuevo_dias')
   // Pestaña "Ajuste" (+/-) gobernada por feature flag; super_admin siempre la ve
   // Ajuste manual de stock (+/-, sin venta ni compra): habilitado para admin y
   // super_admin. Otros roles pueden habilitarse con el flag ajuste_stock_manual.
@@ -84,8 +89,6 @@ export default function AdminProductosPage() {
   // orden y paginado se hacen client-side (sin pegarle a la API por cada filtro).
   const [allProductos, setAllProductos] = useState<Producto[]>([])
   const [loading, setLoading] = useState(true)
-  // Días para considerar un producto "nuevo" (configurable en Configuración general).
-  const [productoNuevoDias, setProductoNuevoDias] = useState(30)
   const [proveedorId, setProveedorId] = useState<string>((savedState.proveedorId as string) ?? '')
   const [laboratorioId, setLaboratorioId] = useState<string>((savedState.laboratorioId as string) ?? '')
   const [soloNuevos, setSoloNuevos] = useState(false)
@@ -136,16 +139,6 @@ export default function AdminProductosPage() {
   useEffect(() => {
     api.get<Deposito[]>('/depositos')
       .then((r) => setDepositos((r.data ?? []).filter((d) => d.activo)))
-      .catch(() => {})
-  }, [])
-
-  // Configuración general: cuántos días cuenta como "producto nuevo".
-  useEffect(() => {
-    api.get<{ producto_nuevo_dias?: string }>('/configuracion')
-      .then((r) => {
-        const d = parseInt(r.data?.producto_nuevo_dias ?? '30', 10)
-        if (!isNaN(d) && d > 0) setProductoNuevoDias(d)
-      })
       .catch(() => {})
   }, [])
 

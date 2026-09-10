@@ -5,6 +5,7 @@ import { X, Loader2, Save, Building2, Phone, Mail, MapPin, Calendar, Percent } f
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { Proveedor } from '@/types'
+import CuentasProveedor from '@/components/proveedores/CuentasProveedor'
 
 interface ProveedorModalProps {
   open: boolean
@@ -275,6 +276,27 @@ export default function ProveedorModal({ open, editingProveedor, onClose, onSave
                 />
               </div>
             </div>
+          </div>
+
+          {/* Libreta de cuentas bancarias. Sólo al editar: las cuentas cuelgan del
+              proveedor y hasta que no está creado no hay id al que colgarlas. */}
+          <div className="pt-6 border-t border-gray-100">
+            {/* Sin `onChange`: la libreta se guarda sola contra la API y el padre
+                usa `onSaved` para cerrar el modal. Notificarlo en cada alta de
+                cuenta cerraría el modal en la cara del usuario. La lista del
+                proveedor se refresca cuando se guarda el formulario. */}
+            {editingProveedor ? (
+              <CuentasProveedor proveedorId={editingProveedor.id} />
+            ) : (
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-[#003087] uppercase tracking-wider">
+                  Cuentas bancarias
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Creá el proveedor y volvé a abrirlo para cargarle las cuentas en las que se le paga.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 sticky bottom-0 bg-white z-10">

@@ -9,6 +9,7 @@ import EditarUbicacionModal from '@/components/entregas/EditarUbicacionModal'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
+import { abrirPedidoPdf } from '@/lib/pedidoPdf'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useAuth } from '@/hooks/useAuth'
 import { Pedido, PaginatedResponse } from '@/types'
@@ -316,18 +317,7 @@ export default function EntregasPage() {
     }
   }
 
-  const handleViewPdf = async (pedidoId: number) => {
-    try {
-      const res = await api.get(`/pedidos/${pedidoId}/pdf`, {
-        responseType: 'blob',
-      })
-      const blob = new Blob([res.data], { type: 'application/pdf' })
-      const url = URL.createObjectURL(blob)
-      window.open(url, '_blank')
-    } catch {
-      toast.error('Error al abrir PDF')
-    }
-  }
+  const handleViewPdf = (pedidoId: number) => abrirPedidoPdf(pedidoId)
 
 
   return (

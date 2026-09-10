@@ -1,12 +1,15 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Settings, Loader2, Save, Sparkles } from 'lucide-react'
+import { Settings, Loader2, Save, Sparkles, TrendingUp } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
+import { formatCurrency } from '@/lib/utils'
+import { useConfiguracion } from '@/hooks/useConfiguracion'
 
 interface Config {
   producto_nuevo_dias: string
+  umbral_mayorista: string
   [k: string]: string
 }
 
@@ -14,6 +17,9 @@ export default function ConfiguracionGeneralPage() {
   const [config, setConfig] = useState<Config | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  // El provider cachea la config para toda la sesión: si no se refresca acá, el
+  // form de pedidos sigue escalando con el umbral viejo hasta recargar la página.
+  const { refresh } = useConfiguracion()
 
   useEffect(() => {
     api.get<Config>('/configuracion')
@@ -29,15 +35,23 @@ export default function ConfiguracionGeneralPage() {
       toast.error('Los días de "producto nuevo" deben estar entre 1 y 365')
       return
     }
+    const umbral = parseInt(config.umbral_mayorista, 10)
+    if (isNaN(umbral) || umbral < 0) {
+      toast.error('El umbral mayorista tiene que ser un número (0 para desactivarlo)')
+      return
+    }
     setSaving(true)
     try {
       const res = await api.put<Config>('/configuracion', {
         producto_nuevo_dias: String(dias),
+        umbral_mayorista: String(umbral),
       })
       setConfig(res.data)
+      await refresh()
       toast.success('Configuración guardada')
-    } catch {
-      toast.error('No se pudo guardar')
+    } catch (err) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(typeof detail === 'string' ? detail : 'No se pudo guardar')
     } finally {
       setSaving(false)
     }
@@ -83,6 +97,40 @@ export default function ConfiguracionGeneralPage() {
                     className="w-24 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
                   />
                   <span className="text-sm text-gray-500">días</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Umbral de escalón a mayorista */}
+          <div className="p-6">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-purple-100 text-purple-700 mt-0.5">
+                <TrendingUp className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <h2 className="text-sm font-semibold text-gray-900">Umbral de precio mayorista</h2>
+                <p className="text-xs text-gray-500 mt-0.5 mb-3">
+                  Un pedido <span className="font-semibold">minorista</span> que supera este importe pasa
+                  automáticamente a precio mayorista. Comercio no escala: es una lista propia, no un tramo por
+                  volumen. Poner <span className="font-semibold">0</span> desactiva el escalón, y cada pedido
+                  puede quedar exceptuado desde su propio formulario.
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500">$</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1000}
+                    value={config.umbral_mayorista}
+                    onChange={(e) => setConfig({ ...config, umbral_mayorista: e.target.value })}
+                    className="w-40 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
+                  />
+                  {Number(config.umbral_mayorista) > 0 && (
+                    <span className="text-sm text-gray-500">
+                      {formatCurrency(Number(config.umbral_mayorista))}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

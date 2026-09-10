@@ -8,6 +8,7 @@ import Sidebar from '@/components/layout/Sidebar'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { FeatureFlagsProvider, useFeatureFlags } from '@/hooks/useFeatureFlags'
+import { ConfiguracionProvider } from '@/hooks/useConfiguracion'
 import { featureKeyForPath } from '@/lib/features'
 
 /** Bloquea el acceso directo por URL a módulos deshabilitados (super_admin ve todo) */
@@ -95,6 +96,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <FeatureFlagsProvider>
+    <ConfiguracionProvider>
     <div className="min-h-screen bg-surface">
       <Sidebar
         user={{ nombre_completo: user.nombre_completo, rol: user.rol }}
@@ -188,6 +190,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       )}
     </div>
+    </ConfiguracionProvider>
     </FeatureFlagsProvider>
   )
 }

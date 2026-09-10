@@ -5,7 +5,7 @@ import { X, Banknote, Loader2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
-import { Proveedor, PaginatedResponse, PagoPendienteInfo } from '@/types'
+import { Proveedor, PaginatedResponse, PagoPendienteInfo, ProveedorCuenta } from '@/types'
 
 interface Props {
   open: boolean
@@ -38,6 +38,9 @@ export default function RegistrarPagoProveedorModal({ open, onClose, onSuccess }
   const [cuentas, setCuentas] = useState<Cuenta[]>([])
   const [proveedorId, setProveedorId] = useState('')
   const [cuentaId, setCuentaId] = useState('')
+  // Cuenta del proveedor a la que va la plata (el otro extremo del giro).
+  const [cuentasProveedor, setCuentasProveedor] = useState<ProveedorCuenta[]>([])
+  const [proveedorCuentaId, setProveedorCuentaId] = useState('')
   const [importe, setImporte] = useState('')
   const [tipoPago, setTipoPago] = useState('transferencia')
   const [fecha, setFecha] = useState(nowLocal())
@@ -71,6 +74,18 @@ export default function RegistrarPagoProveedorModal({ open, onClose, onSuccess }
       })
       .catch(() => setCuentas([]))
   }, [open])
+
+  // Al elegir proveedor, traer las cuentas en las que cobra y proponer la default.
+  useEffect(() => {
+    if (!open || !proveedorId) { setCuentasProveedor([]); setProveedorCuentaId(''); return }
+    api.get<ProveedorCuenta[]>(`/proveedores/${proveedorId}/cuentas`)
+      .then((res) => {
+        setCuentasProveedor(res.data)
+        const def = res.data.find((c) => c.es_default) || res.data[0]
+        setProveedorCuentaId(def ? String(def.id) : '')
+      })
+      .catch(() => { setCuentasProveedor([]); setProveedorCuentaId('') })
+  }, [proveedorId, open])
 
   // Al elegir proveedor, traer sus comprobantes pendientes.
   useEffect(() => {
@@ -132,6 +147,7 @@ export default function RegistrarPagoProveedorModal({ open, onClose, onSuccess }
           aplicar_descuento: false,
           aplicar_cashback: false,
           cuenta_id: cuentaId ? Number(cuentaId) : null,
+          proveedor_cuenta_id: proveedorCuentaId ? Number(proveedorCuentaId) : null,
           fecha: new Date(fecha).toISOString(),
         })
       } else {
@@ -143,6 +159,7 @@ export default function RegistrarPagoProveedorModal({ open, onClose, onSuccess }
           tipo_pago: tipoPago,
           tipo_cuenta: 'remito',
           cuenta_id: cuentaId ? Number(cuentaId) : null,
+          proveedor_cuenta_id: proveedorCuentaId ? Number(proveedorCuentaId) : null,
           referencia_pago: referencia.trim() || null,
           observacion: observacion.trim() || null,
         })
@@ -196,6 +213,48 @@ export default function RegistrarPagoProveedorModal({ open, onClose, onSuccess }
               </select>
             </div>
           </div>
+
+          {/* A dónde va la plata. Sólo aparece si el proveedor tiene cuentas
+              cargadas: si no, el combo vacío sólo sería ruido. */}
+          {proveedorId && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Cuenta del proveedor (a donde va)
+              </label>
+              {cuentasProveedor.length === 0 ? (
+                <p className="text-xs text-gray-400 px-3 py-2 border border-dashed border-gray-200 rounded-lg">
+                  Este proveedor no tiene cuentas cargadas. Se pueden agregar desde su ficha.
+                </p>
+              ) : (
+                <>
+                  <select
+                    value={proveedorCuentaId}
+                    onChange={(e) => setProveedorCuentaId(e.target.value)}
+                    className={inputCls}
+                  >
+                    <option value="">(sin especificar)</option>
+                    {cuentasProveedor.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.etiqueta}
+                        {c.banco ? ` · ${c.banco}` : ''}
+                        {c.es_default ? ' (default)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {(() => {
+                    const sel = cuentasProveedor.find((c) => String(c.id) === proveedorCuentaId)
+                    if (!sel) return null
+                    const detalle = [sel.cbu && `CBU ${sel.cbu}`, sel.alias && `Alias ${sel.alias}`]
+                      .filter(Boolean)
+                      .join(' · ')
+                    return detalle ? (
+                      <p className="mt-1 text-[11px] text-gray-500 font-mono break-all">{detalle}</p>
+                    ) : null
+                  })()}
+                </>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>

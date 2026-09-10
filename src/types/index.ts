@@ -25,6 +25,28 @@ export interface NotaProveedorInfo {
   importe_total: number;
 }
 
+/**
+ * Una cuenta bancaria de la libreta del proveedor: a dónde se le paga.
+ * No confundir con `Cuenta`, que son las cuentas de dinero de Sanalle (de dónde
+ * sale la plata).
+ */
+export interface ProveedorCuenta {
+  id: number;
+  proveedor_id: number;
+  /** Cómo la reconoce quien paga: "Santander principal", "Cheques". */
+  etiqueta: string;
+  banco: string | null;
+  titular: string | null;
+  cuit: string | null;
+  numero_cuenta: string | null;
+  cbu: string | null;
+  alias: string | null;
+  observacion: string | null;
+  /** La que se propone sola al registrar un pago. */
+  es_default: boolean;
+  activo: boolean;
+}
+
 export interface Proveedor {
   id: number;
   nombre: string;
@@ -50,6 +72,8 @@ export interface Proveedor {
   notas?: NotaProveedorInfo[];
   total_notas_credito?: number;
   cashback_pendiente?: number;
+  /** Cuentas activas, la default primero. Viaja en el listado y en el detalle. */
+  cuentas?: ProveedorCuenta[];
 }
 
 export interface PagoDeudaProveedorResponse {
@@ -87,6 +111,8 @@ export interface Laboratorio {
   id: number;
   nombre: string;
   activo: boolean;
+  /** Posición en la lista de precios. 0 = sin definir, va al final. */
+  orden: number;
   created_at: string;
 }
 
@@ -363,6 +389,21 @@ export interface PedidoPlanPago {
 /** Cómo llega la mercadería al cliente. Define qué remito se imprime. */
 export type ModalidadEntrega = 'envio' | 'retira';
 
+/**
+ * Una línea de la cotización que pide más de lo que hay disponible.
+ * Es un aviso: la cotización se guarda igual y recién al confirmarla el faltante
+ * frena la operación. `pedido` y `disponible` vienen ya formateados por el
+ * backend ("3 caja(s) + 2 blíster(s)"), con la misma redacción que el error.
+ */
+export interface AvisoStock {
+  producto_id: number;
+  producto_nombre: string;
+  deposito_id: number;
+  deposito_nombre: string | null;
+  pedido: string;
+  disponible: string;
+}
+
 export interface Pedido {
   id: number;
   numero_pedido: string;
@@ -373,7 +414,17 @@ export interface Pedido {
   vendedor_nombre: string | null;
   shipping_status: 'borrador' | 'pendiente' | 'en_preparacion' | 'listo_para_despacho' | 'en_camino' | 'entregado' | 'cancelado';
   payment_status: 'pendiente' | 'pagado' | 'cancelado' | 'parcial';
+  /** Con qué lista de precios se cotizó. */
   tipo_precio: Grupo | null;
+  /** Qué clase de venta es. Independiente de `tipo_precio`: un minorista puede
+   *  facturarse a precio mayorista por volumen sin dejar de ser minorista. */
+  tipo_cliente: Grupo | null;
+  /** False = este pedido no escala solo a mayorista aunque supere el umbral. */
+  aplica_umbral_mayorista?: boolean;
+  /** Alguna línea salió a un precio distinto del de lista. Informativo. */
+  tiene_excepcion_precio?: boolean;
+  /** Resumen autogenerado de los desvíos. El porqué va en `observacion`. */
+  excepcion_precio_detalle?: string | null;
   semaforo: string | null;
   tipo_documento: 'remito' | 'factura' | null;
   fecha: string;
@@ -404,6 +455,10 @@ export interface Pedido {
   bultos: number;
   /** False = el pedido no compromete mercadería (se factura antes del ingreso). */
   reserva_stock: boolean;
+  /** `reserva_stock` es la intención; esto es el hecho. En borrador va en false. */
+  reserva_vigente?: boolean;
+  /** Sólo viene en el detalle y al guardar. En el listado va vacío a propósito. */
+  avisos_stock?: AvisoStock[];
   items: PedidoItem[];
   plan_pago: PedidoPlanPago[];
   created_at: string;

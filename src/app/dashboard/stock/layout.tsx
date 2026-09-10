@@ -11,12 +11,20 @@ import { useAuth } from '@/hooks/useAuth'
  * datos y filtros, y todas necesitan URL: se linkea a un inventario en curso
  * desde otro lado, y recargar no puede devolverte a la primera pestaña.
  */
-const PESTANAS = [
-  { href: '/dashboard/stock', label: 'Existencias', soloEscritura: false },
-  { href: '/dashboard/stock/movimientos', label: 'Movimientos', soloEscritura: false },
-  { href: '/dashboard/stock/cambios', label: 'Cambios', soloEscritura: false },
-  { href: '/dashboard/stock/inventarios', label: 'Inventarios', soloEscritura: true },
-  { href: '/dashboard/stock/importar', label: 'Carga masiva', soloEscritura: true },
+const ESCRITURA = ['admin', 'super_admin', 'operaciones', 'repartidor']
+
+/**
+ * `roles` ausente = la ve cualquiera que llegue a la sección. Un array de roles
+ * subsume lo que antes era `soloEscritura`, así el archivo no gana un booleano
+ * nuevo por cada regla. Ocultar la pestaña es cosmético: el control real vive en
+ * el `require_role` del backend y en el layout de cada subruta.
+ */
+const PESTANAS: { href: string; label: string; roles?: string[] }[] = [
+  { href: '/dashboard/stock', label: 'Existencias' },
+  { href: '/dashboard/stock/movimientos', label: 'Movimientos' },
+  { href: '/dashboard/stock/cambios', label: 'Cambios', roles: ['admin', 'super_admin'] },
+  { href: '/dashboard/stock/inventarios', label: 'Inventarios', roles: ESCRITURA },
+  { href: '/dashboard/stock/importar', label: 'Carga masiva', roles: ESCRITURA },
 ]
 
 export default function StockLayout({ children }: { children: React.ReactNode }) {
@@ -36,7 +44,7 @@ export default function StockLayout({ children }: { children: React.ReactNode })
       </div>
 
       <nav className="flex gap-1 border-b border-gray-200 overflow-x-auto">
-        {PESTANAS.filter((p) => puedeEscribir || !p.soloEscritura).map((p) => {
+        {PESTANAS.filter((p) => !p.roles || p.roles.includes(user?.rol ?? '')).map((p) => {
           const activa = p.href === '/dashboard/stock'
             ? pathname === p.href
             : pathname.startsWith(p.href)

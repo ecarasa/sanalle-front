@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Eye, Edit, X, ClipboardList, Truck, DollarSign, Trash2, FileText, MoreVertical, CreditCard, Plus, History, ListTree, Construction, UserPlus, MapPin, Phone, User, Package, Calendar, Building2, Hash } from 'lucide-react'
+import { Eye, Edit, X, ClipboardList, Truck, DollarSign, Trash2, FileText, MoreVertical, CreditCard, Plus, History, ListTree, Construction, UserPlus, MapPin, Phone, User, Package, Calendar, Building2, Hash, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -79,6 +79,13 @@ const SHIPPING_BADGE: Record<string, string> = {
   entregado: 'bg-green-100 text-green-700',
   cancelado: 'bg-red-100 text-red-700',
 }
+
+/**
+ * Estados en los que el backend acepta borrar un pedido (`DELETE /pedidos/{id}`).
+ * Después de `en_preparacion` la mercadería ya se está moviendo y el pedido sólo
+ * se cancela, no se borra. Espeja la regla del router: si allá cambia, acá también.
+ */
+const ESTADOS_ELIMINABLES = ['borrador', 'pendiente', 'en_preparacion']
 
 const SHIPPING_LABEL: Record<string, string> = {
   borrador: 'Cotización',
@@ -161,7 +168,7 @@ function PedidoAccionesMenu({
   // pendiente (finalizado, sin tomar). Después ya está en manos de depósito y
   // para corregirlo hay que pedirle que lo devuelva a pendiente.
   const puedeEditar = pedido.shipping_status === 'borrador' || pedido.shipping_status === 'pendiente'
-  const puedeEliminar = puedeEditar || pedido.shipping_status === 'en_preparacion'
+  const puedeEliminar = ESTADOS_ELIMINABLES.includes(pedido.shipping_status)
   // El backend sólo permite registrar el pago a admin/super_admin o al vendedor
   // dueño del pedido (POST /pagos/pedido/{id}) — el botón debe reflejar esa regla.
   const puedePagar =
@@ -298,6 +305,8 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
   )
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('')
   const [sinRepartidor, setSinRepartidor] = useState(false)
+  // Chip de revisión: pedidos con alguna línea fuera de la lista de precios.
+  const [soloExcepciones, setSoloExcepciones] = useState(false)
   // Período por defecto: último mes (evita cargar los ~1.5k pedidos del año).
   const [periodo, setPeriodo] = useState<string>('mes')
   const [sortBy, setSortBy] = useState<string | null>(null)
@@ -314,6 +323,10 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
   // Selección múltiple para cambios de estado masivos.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [bulkStatus, setBulkStatus] = useState<string>('')
+  // Borrado masivo. Confirmación en dos pasos dentro de la misma barra: borrar
+  // no tiene vuelta atrás y no puede salir de un clic de más.
+  const [confirmarBorrado, setConfirmarBorrado] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const [bulkApplying, setBulkApplying] = useState(false)
   const toggleSelect = useCallback((id: number) => {
     setSelectedIds((prev) => {
@@ -357,7 +370,13 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
       const { desde, hasta } = rangoDePeriodo(periodo)
       if (desde) params.fecha_desde = desde
       if (hasta) params.fecha_hasta = hasta
-      if (Object.keys(columnFilters).length > 0) params.filters = JSON.stringify(columnFilters)
+      // El chip de excepciones viaja por el mismo canal que los filtros de columna
+      // (`tiene_excepcion_precio` está en el `allowed_columns` del backend), así no
+      // hace falta un query param aparte.
+      const filtros = soloExcepciones
+        ? { ...columnFilters, tiene_excepcion_precio: 'true' }
+        : columnFilters
+      if (Object.keys(filtros).length > 0) params.filters = JSON.stringify(filtros)
       const res = await api.get<PaginatedResponse<Pedido> & { total_importe?: number }>('/pedidos', { params })
       setData(res.data.items)
       setTotal(res.data.total)
@@ -369,7 +388,7 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, page, pageSize, shippingFilter, paymentFilter, sinRepartidor, periodo, columnFilters, sortBy, sortDir, esCotizaciones])
+  }, [debouncedSearch, page, pageSize, shippingFilter, paymentFilter, sinRepartidor, soloExcepciones, periodo, columnFilters, sortBy, sortDir, esCotizaciones])
 
   useEffect(() => {
     fetchPedidos()
@@ -387,22 +406,78 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
     if (!bulkStatus || selectedIds.size === 0) return
     setBulkApplying(true)
     let ok = 0, fail = 0
+    // El motivo real del rechazo importa: confirmar cotizaciones en masa falla
+    // por falta de stock, no por "transición inválida". Se guarda el primero para
+    // que el usuario sepa qué corregir en vez de sólo cuántos se cayeron.
+    let primerError: string | null = null
     for (const id of Array.from(selectedIds)) {
       try {
         await api.patch(`/pedidos/${id}/shipping-status`, { shipping_status: bulkStatus })
         ok++
-      } catch { fail++ }
+      } catch (err) {
+        fail++
+        const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        if (primerError === null && typeof detail === 'string') primerError = detail
+      }
     }
     setBulkApplying(false)
-    toast.success(`${ok} actualizado${ok === 1 ? '' : 's'}${fail ? `, ${fail} omitido${fail === 1 ? '' : 's'} (transición inválida)` : ''}`)
+    const omitidos = fail
+      ? `, ${fail} omitido${fail === 1 ? '' : 's'}${primerError ? `: ${primerError}` : ''}`
+      : ''
+    toast.success(`${ok} actualizado${ok === 1 ? '' : 's'}${omitidos}`)
     setBulkStatus('')
     clearSelection()
     fetchPedidos()
   }, [bulkStatus, selectedIds, clearSelection, fetchPedidos])
 
+  // De lo seleccionado, qué se puede borrar realmente. El backend rechaza con 400
+  // los pedidos que ya salieron de preparación, así que conviene decirlo ANTES y
+  // no después de intentar 40 borrados.
+  const seleccionEliminable = useMemo(
+    () => data.filter((p) => selectedIds.has(p.id) && ESTADOS_ELIMINABLES.includes(p.shipping_status)),
+    [data, selectedIds]
+  )
+  const seleccionNoEliminable = selectedIds.size - seleccionEliminable.length
+
+  const deleteBulk = useCallback(async () => {
+    if (seleccionEliminable.length === 0) return
+    setBulkDeleting(true)
+    let ok = 0
+    let fail = 0
+    let primerError: string | null = null
+    for (const pedido of seleccionEliminable) {
+      try {
+        await api.delete(`/pedidos/${pedido.id}`)
+        ok++
+      } catch (err) {
+        fail++
+        const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        if (primerError === null && typeof detail === 'string') primerError = detail
+      }
+    }
+    setBulkDeleting(false)
+    setConfirmarBorrado(false)
+    if (ok > 0) {
+      toast.success(
+        `${ok} ${ok === 1 ? 'eliminado' : 'eliminados'}. Se restauró el stock reservado.` +
+        (fail ? ` ${fail} sin borrar${primerError ? `: ${primerError}` : ''}.` : '')
+      )
+    } else {
+      toast.error(primerError || 'No se pudo eliminar ninguno')
+    }
+    clearSelection()
+    fetchPedidos()
+  }, [seleccionEliminable, clearSelection, fetchPedidos])
+
+  // Si cambia la selección, se cae la confirmación pendiente: confirmar sobre una
+  // selección distinta de la que se vio en pantalla sería borrar a ciegas.
+  useEffect(() => {
+    setConfirmarBorrado(false)
+  }, [selectedIds])
+
   useEffect(() => {
     setPage(1)
-  }, [debouncedSearch, shippingFilter, paymentFilter, periodo, sinRepartidor])
+  }, [debouncedSearch, shippingFilter, paymentFilter, periodo, sinRepartidor, soloExcepciones])
 
   useEffect(() => {
     api.get('/pedidos/transiciones')
@@ -607,6 +682,15 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
               {row.sociedad}
             </span>
           )}
+          {row.tiene_excepcion_precio && (
+            <span
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase w-fit bg-amber-100 text-amber-800"
+              title={row.excepcion_precio_detalle || 'Tiene líneas con precio fuera de lista'}
+            >
+              <AlertTriangle className="w-2.5 h-2.5" />
+              Excepción
+            </span>
+          )}
         </div>
       )
     },
@@ -655,6 +739,22 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
     {
       key: 'tipo_precio',
       label: 'Tipo Precio',
+      sortable: true,
+      filterable: true,
+      filterType: 'select' as const,
+      filterOptions: GRUPO_OPTIONS,
+      render: (value: string) => (
+        <span
+          className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase ${esGrupo(value) ? GRUPO_BADGE[value] : 'bg-gray-100 text-gray-600'
+            }`}
+        >
+          {esGrupo(value) ? GRUPO_LABEL[value] : value || '-'}
+        </span>
+      ),
+    },
+    {
+      key: 'tipo_cliente',
+      label: 'Tipo Cliente',
       sortable: true,
       filterable: true,
       filterType: 'select' as const,
@@ -909,6 +1009,18 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
               <UserPlus className="w-3.5 h-3.5" />
               Sin repartidor
             </button>
+            <button
+              type="button"
+              onClick={() => setSoloExcepciones((v) => !v)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full border transition-colors ${soloExcepciones
+                ? 'bg-amber-600 text-white border-amber-600'
+                : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50'
+                }`}
+              title="Solo pedidos con alguna línea a un precio distinto del de lista"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              Con excepción de precio
+            </button>
           </div>
         </div>
         {MOSTRAR_ESTADO_PAGO && (
@@ -934,7 +1046,47 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
       </div>
 
       {/* Barra de acciones masivas — se habilita al tildar */}
-      {selectedIds.size > 0 && (
+      {selectedIds.size > 0 && confirmarBorrado && (
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 shadow-sm">
+          <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-red-900">
+              ¿Eliminar {seleccionEliminable.length} {seleccionEliminable.length === 1 ? 'pedido' : 'pedidos'}?
+            </p>
+            <p className="text-xs text-red-700 mt-0.5">
+              No se puede deshacer. El stock que tenían reservado vuelve a estar disponible.
+              {seleccionNoEliminable > 0 && (
+                <>
+                  {' '}<span className="font-semibold">
+                    {seleccionNoEliminable} de los seleccionados no se {seleccionNoEliminable === 1 ? 'toca' : 'tocan'}
+                  </span>: ya salieron de preparación y sólo se pueden cancelar.
+                </>
+              )}
+            </p>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmarBorrado(false)}
+              disabled={bulkDeleting}
+              className="px-4 py-1.5 text-sm font-semibold text-gray-600 hover:bg-white rounded-lg transition-colors disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={deleteBulk}
+              disabled={bulkDeleting}
+              className="inline-flex items-center gap-2 px-4 py-1.5 text-sm font-bold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+            >
+              {bulkDeleting && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+              Sí, eliminar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {selectedIds.size > 0 && !confirmarBorrado && (
         <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[#003087]/20 bg-[#003087]/5 px-4 py-3 shadow-sm">
           <span className="text-sm font-semibold text-[#003087]">{selectedIds.size} seleccionado{selectedIds.size === 1 ? '' : 's'}</span>
           <button type="button" onClick={selectAllPage} className="text-xs font-medium text-[#003087] hover:underline">
@@ -968,6 +1120,29 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
               {bulkApplying && <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
               Aplicar
             </button>
+
+            <span className="w-px h-6 bg-[#003087]/15" aria-hidden />
+
+            <button
+              type="button"
+              onClick={() => setConfirmarBorrado(true)}
+              disabled={seleccionEliminable.length === 0 || bulkApplying}
+              title={
+                seleccionEliminable.length === 0
+                  ? 'Ninguno de los seleccionados se puede eliminar: ya salieron de preparación'
+                  : `Eliminar ${seleccionEliminable.length} de ${selectedIds.size}`
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold text-red-700 bg-white border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+              Eliminar
+              {seleccionEliminable.length > 0 && seleccionEliminable.length !== selectedIds.size && (
+                <span className="px-1 py-px rounded bg-red-100 text-[10px] font-bold">
+                  {seleccionEliminable.length}
+                </span>
+              )}
+            </button>
+
             <button type="button" onClick={clearSelection} className="p-1.5 text-gray-400 hover:text-gray-600" title="Limpiar selección">
               <X className="w-4 h-4" />
             </button>
@@ -1128,6 +1303,14 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
                             {esGrupo(p.tipo_precio) ? GRUPO_LABEL[p.tipo_precio] : p.tipo_precio || '-'}
                           </span>
                         ))}
+                        {campo('Tipo de cliente', (
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase ${esGrupo(p.tipo_cliente) ? GRUPO_BADGE[p.tipo_cliente] : 'bg-gray-100 text-gray-600'}`}>
+                            {esGrupo(p.tipo_cliente) ? GRUPO_LABEL[p.tipo_cliente] : p.tipo_cliente || '-'}
+                          </span>
+                        ))}
+                        {p.tiene_excepcion_precio && campo('Excepción de precio', (
+                          <span className="text-amber-700">{p.excepcion_precio_detalle || 'Sí'}</span>
+                        ), <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />)}
                         {campo('Sociedad', p.sociedad && <span className="capitalize">{p.sociedad}</span>, <Building2 className="w-3.5 h-3.5" />)}
                         {campo('Bultos', p.bultos ? String(p.bultos) : '0', <Package className="w-3.5 h-3.5" />)}
                         {MOSTRAR_ESTADO_PAGO && campo('Compromiso de pago', p.fecha_compromiso_pago ? formatDate(p.fecha_compromiso_pago) : null, <CreditCard className="w-3.5 h-3.5" />)}
