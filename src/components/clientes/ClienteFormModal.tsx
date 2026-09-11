@@ -8,6 +8,7 @@ import api from '@/lib/api'
 import { GRUPO_OPTIONS } from '@/lib/listas'
 import { ClienteConDeuda, Zona } from '@/types'
 import { CreatableSelect } from '@/components/ui/CreatableSelect'
+import DireccionesCliente, { DireccionPendiente } from '@/components/clientes/DireccionesCliente'
 
 interface Localidad {
   id: number
@@ -76,6 +77,9 @@ export default function ClienteFormModal({
 }: ClienteFormModalProps) {
   const [form, setForm] = useState<ClienteForm>(emptyForm)
   const [saving, setSaving] = useState(false)
+  // Alta: las direcciones se juntan acá y se persisten recién cuando el cliente
+  // existe y tiene id. En edición el componente guarda solo contra la API.
+  const [direccionesNuevas, setDireccionesNuevas] = useState<DireccionPendiente[]>([])
   const [localLocalidades, setLocalLocalidades] = useState<Localidad[]>([])
   const [localZonas, setLocalZonas] = useState<Zona[]>([])
   const [vendedores, setVendedores] = useState<{ id: number; nombre_completo: string }[]>([])
@@ -123,6 +127,8 @@ export default function ClienteFormModal({
     } else {
       setForm(emptyForm)
     }
+    // El buffer es sólo del alta en curso: si el modal se reabre, arranca vacío.
+    setDireccionesNuevas([])
   }, [open, editingCliente])
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -159,8 +165,32 @@ export default function ClienteFormModal({
         await api.put(`/clientes/${editingCliente.id}`, payload)
         toast.success('Cliente actualizado correctamente')
       } else {
-        await api.post('/clientes', payload)
-        toast.success('Cliente creado correctamente')
+        const res = await api.post<{ id: number }>('/clientes', payload)
+        // Las direcciones cuelgan del cliente, así que recién ahora se pueden
+        // guardar. Se mandan de a una y en orden; la principal va última para
+        // que sea la que quede marcada (cada POST desmarca las anteriores).
+        const nuevoId = res.data.id
+        const ordenadas = [
+          ...direccionesNuevas.filter((d) => !d.es_default),
+          ...direccionesNuevas.filter((d) => d.es_default),
+        ]
+        let fallidas = 0
+        for (const dir of ordenadas) {
+          try {
+            await api.post(`/clientes/${nuevoId}/direcciones`, dir)
+          } catch {
+            fallidas++
+          }
+        }
+        // El cliente YA se creó: si alguna dirección falló hay que decirlo sin
+        // dar a entender que se perdió todo, o el usuario lo carga de nuevo.
+        if (fallidas > 0) {
+          toast.error(
+            `Cliente creado, pero ${fallidas} ${fallidas === 1 ? 'dirección no se guardó' : 'direcciones no se guardaron'}. Cargalas desde la ficha.`
+          )
+        } else {
+          toast.success('Cliente creado correctamente')
+        }
       }
       onSuccess()
       onClose()
@@ -179,7 +209,7 @@ export default function ClienteFormModal({
       isDismissable
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
     >
-      <Modal className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto outline-none">
+      <Modal className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto outline-none">
         <Dialog className="outline-none">
           <div className="flex items-center justify-between p-6 border-b border-gray-100">
             <div className="flex items-center gap-3">
@@ -438,6 +468,17 @@ export default function ClienteFormModal({
                 rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087] resize-none"
                 placeholder="Comentarios sobre el cliente..."
+              />
+            </div>
+
+            <div className="pt-4 border-t border-gray-100">
+              <DireccionesCliente
+                clienteId={editingCliente?.id ?? null}
+                localidades={localLocalidades}
+                pendientes={direccionesNuevas}
+                onPendientesChange={setDireccionesNuevas}
+                domicilioFiscal={form.domicilio}
+                localidadFiscalId={form.localidad_id}
               />
             </div>
 
