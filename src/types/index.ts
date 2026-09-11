@@ -433,6 +433,8 @@ export interface Pedido {
   /** 'envio' = se despacha a la dirección de entrega; 'retira' = el cliente pasa por el depósito. */
   modalidad_entrega: ModalidadEntrega;
   fecha_compromiso_pago: string | null;
+  /** Cómo se va a cobrar: efectivo | transferencia | cheque. Informativo. */
+  forma_pago: string | null;
   despachado: boolean;
   sociedad: string | null;
   /** Nombres de los depósitos de los que sale el pedido. */

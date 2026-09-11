@@ -1322,6 +1322,18 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
                     </section>
                   </div>
 
+                  {/* `forma_pago` es lo que carga ventas hoy. El plan multi-tramo
+                      quedó sólo para los pedidos viejos que lo tengan; si hay uno,
+                      se muestra ese porque es más detallado. */}
+                  {!p.plan_pago?.length && p.forma_pago && (
+                    <section className="rounded-2xl border border-gray-100 p-4">
+                      <h3 className="text-[11px] uppercase tracking-wide text-gray-400 font-bold mb-2">
+                        Forma de pago
+                      </h3>
+                      <p className="text-sm text-gray-700 capitalize">{p.forma_pago}</p>
+                    </section>
+                  )}
+
                   {p.plan_pago?.length > 0 && (
                     <section className="rounded-2xl border border-gray-100 p-4">
                       <h3 className="text-[11px] uppercase tracking-wide text-gray-400 font-bold mb-2">

@@ -119,7 +119,7 @@ export default function EditarPedidoPage() {
       initialTipoCliente={pedido.tipo_cliente}
       initialAplicaUmbralMayorista={pedido.aplica_umbral_mayorista}
       initialReservaStock={pedido.reserva_stock}
-      initialPlanPago={pedido.plan_pago}
+      initialFormaPago={pedido.forma_pago}
       shippingStatus={pedido.shipping_status}
       initialItems={initialItems}
       isEditing={true}

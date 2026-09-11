@@ -9,8 +9,9 @@ import { parseDate, today, getLocalTimeZone, type DateValue } from '@internation
 import api from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
+import { enteroDeInput, decimalDeInput, seleccionarAlEnfocar } from '@/lib/inputNumerico'
 import { useConfiguracion } from '@/hooks/useConfiguracion'
-import { AvisoStock, ClienteDireccion, Deposito, ModalidadEntrega, PedidoPlanPago, Producto, User } from '@/types'
+import { AvisoStock, ClienteDireccion, Deposito, ModalidadEntrega, Producto, User } from '@/types'
 import { useAuth } from '@/hooks/useAuth'
 import {
   GRUPO_LABEL,
@@ -77,14 +78,17 @@ export const precioDeLista = (
   return precios[lista.key] ?? null
 }
 
-/** Cuenta de dinero de la empresa, tal como la devuelve `GET /cuentas`. */
-interface CuentaSimple {
-  id: number
-  nombre: string
-  tipo: string
-  es_default: boolean
-  activo?: boolean
-}
+/**
+ * Cómo se va a cobrar el pedido. Son los valores de `TipoPago` del backend, para
+ * que al registrar el cobro de verdad la forma coincida sin traducir.
+ * `retencion` existe en el enum pero no se ofrece acá: no es algo que se
+ * planifique al tomar el pedido.
+ */
+const FORMAS_PAGO = [
+  { value: 'efectivo', label: 'Efectivo' },
+  { value: 'transferencia', label: 'Transferencia' },
+  { value: 'cheque', label: 'Cheque' },
+]
 
 interface PedidoFormProps {
   pedidoId: number
@@ -127,8 +131,8 @@ interface PedidoFormProps {
   initialTipoCliente?: Grupo | null
   /** False = este pedido no escala solo a mayorista aunque supere el umbral. */
   initialAplicaUmbralMayorista?: boolean
-  /** Plan de cobro del pedido (informativo: no genera pagos). */
-  initialPlanPago?: PedidoPlanPago[]
+  /** Cómo se va a cobrar: efectivo | transferencia | cheque. Informativo. */
+  initialFormaPago?: string | null
   /** False = el pedido no compromete mercadería (se factura antes del ingreso). */
   initialReservaStock?: boolean
   /** Estado del pedido. Solo un borrador se "finaliza"; el resto ya lo está. */
@@ -170,7 +174,7 @@ export default function PedidoForm({
   initialTipoPrecio,
   initialTipoCliente,
   initialAplicaUmbralMayorista,
-  initialPlanPago,
+  initialFormaPago,
   initialReservaStock,
   shippingStatus,
   isEditing,
@@ -234,11 +238,10 @@ export default function PedidoForm({
   // principal del cliente sin tener que ir a su ficha.
   const [nuevaEsPrincipal, setNuevaEsPrincipal] = useState(false)
 
-  // Plan de cobro: cómo se va a cobrar el pedido y a qué cuenta entra cada parte.
-  // Es un dato para cobranza; no crea pagos ni mueve la cuenta corriente.
-  const [planPago, setPlanPago] = useState<PedidoPlanPago[]>(initialPlanPago ?? [])
-  const [cuentas, setCuentas] = useState<CuentaSimple[]>([])
-  const [formasPago, setFormasPago] = useState<string[]>([])
+  // Cómo se va a cobrar. Es un dato para cobranza: no crea pagos ni mueve la
+  // cuenta corriente. Reemplaza al plan multi-tramo, que pedía importe y cuenta
+  // por cada parte y en la práctica quedaba vacío.
+  const [formaPago, setFormaPago] = useState<string>(initialFormaPago ?? '')
 
   // Índice de la línea que el modal está editando. null = alta de una línea nueva.
   // Es lo que hace que el mismo modal sirva para agregar y para corregir, sin
@@ -393,42 +396,8 @@ export default function PedidoForm({
     })
       .then((res) => setTransportesSugeridos(res.data.items.map((e) => e.nombre)))
       .catch(() => { /* el campo sigue siendo texto libre: sin sugerencias se puede tipear */ })
-
-    api.get<{ items: { nombre: string }[] }>('/entidades', {
-      params: { categoria: 'condicion_pago', solo_activos: true },
-    })
-      .then((res) => setFormasPago(res.data.items.map((e) => e.nombre)))
-      .catch(() => { /* idem */ })
-
-    api.get<CuentaSimple[]>('/cuentas')
-      .then((res) => setCuentas(res.data.filter((c) => c.activo !== false)))
-      .catch(() => { /* sin cuentas el plan igual se puede cargar, solo sin destino */ })
   }, [])
 
-  // --- Plan de cobro ---------------------------------------------------------
-
-  const totalPlanPago = useMemo(
-    () => planPago.reduce((suma, t) => suma + (Number(t.importe) || 0), 0),
-    [planPago]
-  )
-
-  const agregarTramoPago = () =>
-    setPlanPago((prev) => [
-      ...prev,
-      {
-        forma: formasPago[0] ?? 'Contado',
-        cuenta_id: cuentas.find((c) => c.es_default)?.id ?? null,
-        // El primer tramo arranca con el total del pedido: el caso más común es
-        // uno solo, y así no hay que tipear el importe.
-        importe: prev.length === 0 ? importeTotal : 0,
-      },
-    ])
-
-  const cambiarTramoPago = (idx: number, patch: Partial<PedidoPlanPago>) =>
-    setPlanPago((prev) => prev.map((t, i) => (i === idx ? { ...t, ...patch } : t)))
-
-  const quitarTramoPago = (idx: number) =>
-    setPlanPago((prev) => prev.filter((_, i) => i !== idx))
 
   useEffect(() => {
     if (!clienteId) return
@@ -557,7 +526,7 @@ export default function PedidoForm({
       aplica_umbral_mayorista: aplicaUmbral,
       vendedor_id: vendedorId,
       reserva_stock: reservaStock,
-      plan_pago: planPago,
+      forma_pago: formaPago || null,
     })
 
     if (previousData.current === null) {
@@ -594,7 +563,7 @@ export default function PedidoForm({
           aplica_umbral_mayorista: aplicaUmbral,
           vendedor_id: vendedorId,
           reserva_stock: reservaStock,
-          plan_pago: planPago,
+          forma_pago: formaPago || null,
         })
         // El backend recalcula el faltante contra el stock real en cada guardado:
         // es la única fuente confiable, porque el catálogo en memoria del form
@@ -637,7 +606,7 @@ export default function PedidoForm({
     tipoCliente,
     aplicaUmbral,
     reservaStock,
-    planPago,
+    formaPago,
   ])
 
 
@@ -759,11 +728,15 @@ export default function PedidoForm({
   )
 
   const handleCantidadChange = (e: React.ChangeEvent<HTMLInputElement>, selectedProduct: Producto) => {
-    const cantidad = Number(e.target.value)
+    const cantidad = enteroDeInput(e)
     const disponible = disponibleParaLinea(selectedProduct, modalUnidad, modalDepositoEfectivo, editandoIdx)
     if (limitaPorStock && cantidad > disponible) {
       const u = modalUnidad === 'blister' ? 'blísters' : 'cajas'
       toast.error(`No puedes pedir más de ${disponible} ${u}`)
+      // Se corta acá sin tocar el estado, así que el campo queda mostrando lo que
+      // se tipeó. Se lo devuelve al último valor válido para que no quede un
+      // número que el pedido nunca aceptó.
+      e.target.value = String(modalCantidad)
       return
     }
     setModalCantidad(cantidad)
@@ -1078,7 +1051,7 @@ export default function PedidoForm({
         aplica_umbral_mayorista: aplicaUmbral,
         vendedor_id: vendedorId,
         reserva_stock: reservaStock,
-        plan_pago: planPago,
+        forma_pago: formaPago || null,
       })
       // Finalizar es lo que saca al pedido de borrador y lo pone en la cola de
       // depósito. Un pedido que ya se finalizó antes se guarda y listo: volver a
@@ -1357,6 +1330,20 @@ export default function PedidoForm({
             )}
           </div>
           <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Forma de Pago</label>
+            <select
+              value={formaPago}
+              onChange={(e) => setFormaPago(e.target.value)}
+              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
+            >
+              <option value="">Sin especificar</option>
+              {FORMAS_PAGO.map((f) => (
+                <option key={f.value} value={f.value}>{f.label}</option>
+              ))}
+            </select>
+            <p className="text-[11px] text-gray-400 mt-1">Indicación para cobranza: no registra el cobro.</p>
+          </div>
+          <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Transporte</label>
             <input type="text" list="transportes-sugeridos" value={transporte} disabled={esRetiro}
               onChange={(e) => setTransporte(e.target.value)} placeholder="OCA, propio..."
@@ -1563,97 +1550,6 @@ export default function PedidoForm({
         </div>
       </div>
 
-      {/* Plan de cobro — informativo: no genera pagos ni mueve cuenta corriente */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="text-lg font-semibold text-gray-900">Cómo paga</h2>
-          <button
-            type="button"
-            onClick={agregarTramoPago}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-[#003087] bg-[#003087]/10 hover:bg-[#003087]/20"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Agregar forma de pago
-          </button>
-        </div>
-        <p className="text-xs text-gray-400 mb-4">
-          Cómo se va a cobrar y a qué cuenta entra cada parte. Es una indicación para
-          cobranza: no registra el cobro ni afecta la cuenta corriente.
-        </p>
-
-        {planPago.length === 0 ? (
-          <p className="text-sm text-gray-400 py-3">
-            Sin especificar. Se puede dejar vacío si el pedido se cobra de una sola forma.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {planPago.map((tramo, idx) => (
-              <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                <div className="col-span-4">
-                  <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Forma</label>
-                  <input
-                    type="text"
-                    list="formas-pago-sugeridas"
-                    value={tramo.forma}
-                    onChange={(e) => cambiarTramoPago(idx, { forma: e.target.value })}
-                    placeholder="Transferencia, efectivo..."
-                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
-                  />
-                </div>
-                <div className="col-span-5">
-                  <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Cuenta destino</label>
-                  <select
-                    value={tramo.cuenta_id ?? ''}
-                    onChange={(e) => cambiarTramoPago(idx, { cuenta_id: e.target.value ? Number(e.target.value) : null })}
-                    className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
-                  >
-                    <option value="">Sin definir</option>
-                    {cuentas.map((c) => (
-                      <option key={c.id} value={c.id}>{c.nombre}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">Importe</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={tramo.importe}
-                    onChange={(e) => cambiarTramoPago(idx, { importe: parseFloat(e.target.value) || 0 })}
-                    className="w-full px-2.5 py-1.5 text-sm text-right border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
-                  />
-                </div>
-                <div className="col-span-1 flex justify-center pb-1">
-                  <button
-                    type="button"
-                    onClick={() => quitarTramoPago(idx)}
-                    className="p-1 rounded-lg text-red-500 hover:bg-red-50"
-                    title="Quitar"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-            <datalist id="formas-pago-sugeridas">
-              {formasPago.map((f) => <option key={f} value={f} />)}
-            </datalist>
-
-            <div className="flex justify-end gap-6 pt-2 border-t border-gray-50 text-sm">
-              <span className="text-gray-500">
-                Asignado: <strong className="text-gray-900">{formatCurrency(totalPlanPago)}</strong>
-              </span>
-              {Math.abs(totalPlanPago - importeTotal) > 0.009 && (
-                <span className={totalPlanPago > importeTotal ? 'text-red-600 font-medium' : 'text-amber-600 font-medium'}>
-                  {totalPlanPago > importeTotal ? 'Se pasa por ' : 'Faltan asignar '}
-                  {formatCurrency(Math.abs(totalPlanPago - importeTotal))}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
 
       {/* Items Section */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -1775,7 +1671,8 @@ export default function PedidoForm({
                           min={1}
                           max={topeDeLinea(item, idx)}
                           value={item.cantidad}
-                          onChange={(e) => editarLinea(idx, { cantidad: parseInt(e.target.value, 10) || 0 })}
+                          onFocus={seleccionarAlEnfocar}
+                          onChange={(e) => editarLinea(idx, { cantidad: enteroDeInput(e) })}
                           className="w-16 px-1.5 py-1 text-sm text-right border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
                         />
                         <span className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide rounded-full border ${item.unidad_venta === 'blister' ? 'text-[#00AEEF] bg-[#00AEEF]/10 border-[#00AEEF]/30' : 'text-gray-500 bg-gray-100 border-gray-200'}`}>
@@ -2081,8 +1978,9 @@ export default function PedidoForm({
                           min={0}
                           step={0.01}
                           value={modalPrecioLista}
+                          onFocus={seleccionarAlEnfocar}
                           onChange={(e) => {
-                            const lista = Number(e.target.value)
+                            const lista = decimalDeInput(e)
                             setModalPrecioLista(lista)
                             setModalPrecio(lista * (1 - modalDescuento / 100))
                           }}
@@ -2114,7 +2012,8 @@ export default function PedidoForm({
                         min={0}
                         step={0.01}
                         value={modalPrecio}
-                        onChange={(e) => setModalPrecio(Number(e.target.value))}
+                        onFocus={seleccionarAlEnfocar}
+                        onChange={(e) => setModalPrecio(decimalDeInput(e))}
                         className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#003087]/20 focus:border-[#003087]"
                       />
                     </div>
@@ -2128,6 +2027,7 @@ export default function PedidoForm({
                         min={1}
                         value={modalCantidad}
                         max={limitaPorStock ? disponibleParaLinea(selectedProduct, modalUnidad, modalDepositoEfectivo, editandoIdx) : undefined}
+                        onFocus={seleccionarAlEnfocar}
                         onChange={(e) => handleCantidadChange(e, selectedProduct)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
