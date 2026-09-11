@@ -243,6 +243,8 @@ export default function EntregasPage() {
         page_size: 500,
         sort_by: 'fecha_entrega',
         sort_dir: 'asc',
+        // Una cotización con una fecha_entrega sugerida no es una entrega real.
+        tipo: 'pedido',
       }
       if (sinFecha) {
         // Sin acotar por día hay que acotar por estado: pedir todo traería el

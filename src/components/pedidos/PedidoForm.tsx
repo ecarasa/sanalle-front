@@ -1024,12 +1024,10 @@ export default function PedidoForm({
     return disponibleParaLinea(producto, linea.unidad_venta, linea.deposito_id ?? depositoId, idx)
   }
 
-  // Mismo criterio que el título: mientras sigue en borrador, `modo` decide la
-  // intención. Confirmado, ya es un pedido sin ambigüedad. `shippingStatus`
-  // llega undefined en el primer render de un pedido nuevo (todavía no volvió
-  // la respuesta del POST inicial) — se lo trata como borrador, que es lo que
-  // va a ser.
-  const esCotizacionAhora = modo === 'cotizacion' && (shippingStatus ?? 'borrador') === 'borrador'
+  // `modo` ya viene calculado por el padre a partir de `tipo_pedido` (el
+  // trinquete del backend: una vez confirmado, deja de ser cotización pase lo
+  // que pase con el shipping_status), así que acá no hace falta re-derivarlo.
+  const esCotizacionAhora = modo === 'cotizacion'
 
   /** El PUT completo del pedido. Un solo lugar para las dos acciones de abajo
    *  (y el autosave, más arriba) piden exactamente los mismos campos. */

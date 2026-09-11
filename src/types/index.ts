@@ -413,6 +413,8 @@ export interface Pedido {
   vendedor_id: number;
   vendedor_nombre: string | null;
   shipping_status: 'borrador' | 'pendiente' | 'en_preparacion' | 'listo_para_despacho' | 'en_camino' | 'entregado' | 'cancelado';
+  /** Trinquete: pasa de 'cotizacion' a 'pedido' al confirmarse y no vuelve atrás. */
+  tipo_pedido: 'cotizacion' | 'pedido';
   payment_status: 'pendiente' | 'pagado' | 'cancelado' | 'parcial';
   /** Con qué lista de precios se cotizó. */
   tipo_precio: Grupo | null;

@@ -61,10 +61,10 @@ export default function EditarPedidoPage() {
     router.back()
   }
 
-  // El listado de Pedidos excluye los borradores (`excluir_borradores`), así
-  // que a un borrador sólo se llega editándolo desde Cotizaciones. El estado
-  // ya nos dice todo lo que necesitamos: no hace falta un query param acá.
-  const modo = pedido?.shipping_status === 'borrador' ? 'cotizacion' : 'pedido'
+  // `tipo_pedido` es el trinquete del backend: una cotización sigue siendo
+  // cotización aunque se la cancele sin confirmar, así que es más confiable
+  // que mirar el shipping_status actual.
+  const modo = pedido?.tipo_pedido === 'cotizacion' ? 'cotizacion' : 'pedido'
 
   if (loading || !pedido) {
     return (

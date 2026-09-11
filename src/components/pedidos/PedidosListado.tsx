@@ -23,8 +23,8 @@ type DetailTab = 'detalle' | 'bitacora'
 type ShippingFilter = '' | 'borrador' | 'pendiente' | 'en_preparacion' | 'listo_para_despacho' | 'en_camino' | 'entregado' | 'cancelado'
 type PaymentFilter = '' | 'pendiente' | 'pagado' | 'parcial' | 'cancelado'
 
-// Sin 'borrador': las cotizaciones tienen su propia pantalla y no se filtran
-// desde acá.
+// Sin 'borrador': un pedido confirmado nunca vuelve a estar en borrador salvo
+// que depósito lo reabra, así que no vale la pena un tab para eso acá.
 const SHIPPING_TABS: { label: string; value: ShippingFilter }[] = [
   { label: 'Todos', value: '' },
   { label: 'Pendiente', value: 'pendiente' },
@@ -33,6 +33,14 @@ const SHIPPING_TABS: { label: string; value: ShippingFilter }[] = [
   { label: 'En Camino', value: 'en_camino' },
   { label: 'Entregado', value: 'entregado' },
   { label: 'Cancelado', value: 'cancelado' },
+]
+
+// Una cotización puede estar en borrador (todavía cargándose) o cancelada sin
+// haber llegado a confirmarse. Son los dos únicos estados posibles acá.
+const COTIZACION_TABS: { label: string; value: ShippingFilter }[] = [
+  { label: 'Todas', value: '' },
+  { label: 'Borrador', value: 'borrador' },
+  { label: 'Canceladas', value: 'cancelado' },
 ]
 
 const PAYMENT_TABS: { label: string; value: PaymentFilter }[] = [
@@ -298,11 +306,11 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({})
-  // En Cotizaciones el estado está fijo: todas son borrador. En Pedidos arranca
-  // sin filtro y el backend ya deja las cotizaciones afuera.
-  const [shippingFilter, setShippingFilter] = useState<ShippingFilter>(
-    modo === 'cotizaciones' ? 'borrador' : ''
-  )
+  // El filtro por tipo (cotización/pedido) ya separa las dos pantallas, así que
+  // acá arranca sin filtro de despacho en los dos modos. En Cotizaciones esto
+  // además hace que una cotización cancelada sin confirmar no quede huérfana:
+  // antes quedaba fija en shipping_status=borrador y esas nunca aparecían.
+  const [shippingFilter, setShippingFilter] = useState<ShippingFilter>('')
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('')
   const [sinRepartidor, setSinRepartidor] = useState(false)
   // Chip de revisión: pedidos con alguna línea fuera de la lista de precios.
@@ -363,8 +371,9 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
       }
       if (sortBy) params.sort_by = sortBy
       if (shippingFilter) params.shipping_status = shippingFilter
-      // Las cotizaciones tienen su propia pantalla: acá no se mezclan.
-      if (!esCotizaciones) params.excluir_borradores = true
+      // Filtra por tipo_pedido, no por shipping_status: una cotización cancelada
+      // sin confirmar sigue siendo cotización pase lo que pase con su despacho.
+      params.tipo = esCotizaciones ? 'cotizacion' : 'pedido'
       if (paymentFilter) params.payment_status = paymentFilter
       if (sinRepartidor) params.sin_repartidor = true
       const { desde, hasta } = rangoDePeriodo(periodo)
@@ -517,7 +526,7 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
         search: debouncedSearch,
       }
       if (shippingFilter) exportParams.shipping_status = shippingFilter
-      if (!esCotizaciones) exportParams.excluir_borradores = 'true'
+      exportParams.tipo = esCotizaciones ? 'cotizacion' : 'pedido'
       if (paymentFilter) exportParams.payment_status = paymentFilter
 
       if (format === 'json') {
@@ -986,10 +995,12 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
 
       {/* Filtros (más prolijos, en tarjeta) */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
-        <div className={`flex flex-col sm:flex-row sm:items-center gap-2 ${esCotizaciones ? 'hidden' : ''}`}>
-          <span className="text-[11px] font-bold uppercase tracking-widest text-gray-400 w-16 shrink-0">Despacho</span>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-gray-400 w-16 shrink-0">
+            {esCotizaciones ? 'Estado' : 'Despacho'}
+          </span>
           <div className="flex flex-wrap gap-1.5">
-            {SHIPPING_TABS.map((tab) => (
+            {(esCotizaciones ? COTIZACION_TABS : SHIPPING_TABS).map((tab) => (
               <button
                 key={tab.value}
                 type="button"
