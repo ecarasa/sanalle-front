@@ -110,6 +110,7 @@ export default function EditarPedidoPage() {
       initialDireccionEntregaId={pedido.direccion_entrega_id}
       clienteDomicilio={pedido.cliente_domicilio}
       clienteLocalidad={pedido.cliente_localidad}
+      clienteLocalidadId={pedido.cliente_localidad_id}
       clienteCodigoPostal={pedido.cliente_codigo_postal}
       clienteProvincia={pedido.cliente_provincia}
       initialSociedad={pedido.sociedad}

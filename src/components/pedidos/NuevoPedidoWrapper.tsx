@@ -123,6 +123,7 @@ export default function NuevoPedidoWrapper({ initialClienteId }: NuevoPedidoWrap
         clienteDiasEntrega={cliente.dias_entrega}
         clienteDomicilio={cliente.domicilio}
         clienteLocalidad={cliente.localidad_nombre}
+        clienteLocalidadId={cliente.localidad_id}
         clienteCodigoPostal={cliente.localidad_codigo_postal}
         clienteProvincia={cliente.localidad_provincia}
         clienteTransporteHabitual={cliente.transporte_habitual}

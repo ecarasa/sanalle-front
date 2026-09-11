@@ -443,6 +443,8 @@ export interface Pedido {
   cliente_domicilio?: string | null;
   cliente_telefono?: string | null;
   cliente_localidad?: string | null;
+  /** Para geocodificar una dirección nueva guardada desde el form de pedidos. */
+  cliente_localidad_id?: number | null;
   cliente_codigo_postal?: string | null;
   cliente_provincia?: string | null;
   cliente_zona?: string | null;

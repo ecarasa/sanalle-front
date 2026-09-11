@@ -97,6 +97,8 @@ interface PedidoFormProps {
   /** Datos de dirección del cliente (se muestran y arman el default del envío). */
   clienteDomicilio?: string | null
   clienteLocalidad?: string | null
+  /** Para geocodificar una dirección nueva guardada desde acá. */
+  clienteLocalidadId?: number | null
   clienteCodigoPostal?: string | null
   clienteProvincia?: string | null
   numeroPedido: string
@@ -146,6 +148,7 @@ export default function PedidoForm({
   clienteDiasEntrega,
   clienteDomicilio,
   clienteLocalidad,
+  clienteLocalidadId,
   clienteCodigoPostal,
   clienteProvincia,
   numeroPedido,
@@ -227,6 +230,9 @@ export default function PedidoForm({
     initialDireccionEntregaId ?? null
   )
   const [etiquetaNueva, setEtiquetaNueva] = useState('')
+  // Al guardar una dirección nueva desde el pedido, poder dejarla como la
+  // principal del cliente sin tener que ir a su ficha.
+  const [nuevaEsPrincipal, setNuevaEsPrincipal] = useState(false)
 
   // Plan de cobro: cómo se va a cobrar el pedido y a qué cuenta entra cada parte.
   // Es un dato para cobranza; no crea pagos ni mueve la cuenta corriente.
@@ -466,12 +472,26 @@ export default function PedidoForm({
       const res = await api.post<ClienteDireccion>(`/clientes/${clienteId}/direcciones`, {
         etiqueta: etiquetaNueva.trim() || 'Entrega',
         direccion: texto,
-        es_default: direcciones.length === 0,
+        // Sin localidad el backend no puede geocodificar y la entrega no aparece
+        // en el mapa de reparto. Se hereda la del cliente, que es la correcta en
+        // la enorme mayoría de los casos; si no lo es, se corrige en su ficha.
+        localidad_id: clienteLocalidadId ?? null,
+        codigo_postal: envioCp.trim() || null,
+        // La primera siempre es la principal; el resto, sólo si lo piden.
+        es_default: nuevaEsPrincipal || direcciones.length === 0,
       })
-      setDirecciones((prev) => [...prev, res.data])
+      // Si quedó como principal, las demás dejaron de serlo en el backend.
+      setDirecciones((prev) =>
+        (res.data.es_default ? prev.map((d) => ({ ...d, es_default: false })) : prev).concat(res.data)
+      )
       setDireccionEntregaId(res.data.id)
       setEtiquetaNueva('')
-      toast.success('Dirección guardada en la ficha del cliente')
+      setNuevaEsPrincipal(false)
+      toast.success(
+        res.data.es_default
+          ? 'Dirección guardada como principal del cliente'
+          : 'Dirección guardada en la ficha del cliente'
+      )
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       toast.error(typeof detail === 'string' ? detail : 'No se pudo guardar la dirección')
@@ -1401,12 +1421,17 @@ export default function PedidoForm({
           >
             {direcciones.map((d) => (
               <option key={d.id} value={d.id}>
-                {d.etiqueta}: {d.direccion}
+                {d.es_default ? '★ ' : ''}{d.etiqueta}: {d.direccion}
                 {d.localidad_nombre ? ` (${d.localidad_nombre})` : ''}
               </option>
             ))}
             <option value="otra">Otra dirección…</option>
           </select>
+          {direcciones.length > 1 && (
+            <p className="text-[11px] text-gray-400 mt-1">
+              {direcciones.length} direcciones cargadas. ★ es la principal.
+            </p>
+          )}
 
           {direccionEntregaId === null && (
             <>
@@ -1462,6 +1487,17 @@ export default function PedidoForm({
                   {guardandoDireccion ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                   Guardar para este cliente
                 </button>
+                {direcciones.length > 0 && (
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={nuevaEsPrincipal}
+                      onChange={(e) => setNuevaEsPrincipal(e.target.checked)}
+                      className="w-3.5 h-3.5 rounded border-gray-300 text-[#003087] focus:ring-[#003087]/40"
+                    />
+                    <span className="text-[11px] text-gray-600">Dejarla como principal</span>
+                  </label>
+                )}
               </div>
             </>
           )}
