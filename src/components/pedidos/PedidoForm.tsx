@@ -137,6 +137,15 @@ interface PedidoFormProps {
   initialReservaStock?: boolean
   /** Estado del pedido. Solo un borrador se "finaliza"; el resto ya lo está. */
   shippingStatus?: string
+  /**
+   * Con qué intención se abrió esta pantalla: 'cotizacion' viene de la solapa
+   * Cotizaciones (nueva, o editando una que sigue en borrador) y 'pedido' de
+   * Pedidos. Sólo importa mientras el pedido sigue en `borrador`: define si el
+   * botón de acción guarda el borrador y vuelve a Cotizaciones, o lo confirma
+   * y lo manda a Pedidos. Una vez confirmado, el pedido deja de ser una
+   * cotización pase lo que pase, así que el default 'pedido' es siempre correcto.
+   */
+  modo?: 'pedido' | 'cotizacion'
 
   isEditing: boolean
   onCancel: () => void
@@ -177,6 +186,7 @@ export default function PedidoForm({
   initialFormaPago,
   initialReservaStock,
   shippingStatus,
+  modo = 'pedido',
   isEditing,
   onCancel,
 }: PedidoFormProps) {
@@ -1014,7 +1024,46 @@ export default function PedidoForm({
     return disponibleParaLinea(producto, linea.unidad_venta, linea.deposito_id ?? depositoId, idx)
   }
 
-  const handleFinalize = async () => {
+  // Mismo criterio que el título: mientras sigue en borrador, `modo` decide la
+  // intención. Confirmado, ya es un pedido sin ambigüedad. `shippingStatus`
+  // llega undefined en el primer render de un pedido nuevo (todavía no volvió
+  // la respuesta del POST inicial) — se lo trata como borrador, que es lo que
+  // va a ser.
+  const esCotizacionAhora = modo === 'cotizacion' && (shippingStatus ?? 'borrador') === 'borrador'
+
+  /** El PUT completo del pedido. Un solo lugar para las dos acciones de abajo
+   *  (y el autosave, más arriba) piden exactamente los mismos campos. */
+  const buildPedidoPutBody = () => ({
+    tipo_documento: tipoDocumento,
+    items: itemsPayload,
+    observacion: observacion || null,
+    fecha: fechaCreacionDate ? fechaCreacionDate.toString() : null,
+    transporte: transporte || null,
+    modalidad_entrega: modalidadEntrega,
+    direccion_entrega: direccionEntrega || null,
+    direccion_entrega_id: direccionEntregaId,
+    sociedad: sociedad || null,
+    deposito_id: depositoId,
+    fecha_compromiso_pago: fechaCompromisoPago ? fechaCompromisoPago.toString() : null,
+    tipo_precio: tipoPrecio,
+    tipo_cliente: tipoCliente,
+    aplica_umbral_mayorista: aplicaUmbral,
+    vendedor_id: vendedorId,
+    reserva_stock: reservaStock,
+    forma_pago: formaPago || null,
+  })
+
+  /**
+   * Guarda y confirma la cotización que hay en pantalla como pedido: PUT +
+   * transición a `pendiente`, y redirige a Pedidos.
+   *
+   * Es el único camino desde acá para que una cotización se convierta en
+   * pedido — el otro es la acción masiva "Confirmar" del listado de
+   * Cotizaciones. Alguna vez podría hacer falta una tercera vía (un botón
+   * secundario en esta misma pantalla, en modo cotización) si confirmar desde
+   * acá se vuelve algo frecuente, pero no lo pidieron todavía.
+   */
+  const confirmarComoPedido = async () => {
     if (items.length === 0) {
       toast.error('Debe agregar al menos un producto')
       return
@@ -1034,25 +1083,7 @@ export default function PedidoForm({
 
     setSaving(true)
     try {
-      await api.put(`/pedidos/${pedidoId}`, {
-        tipo_documento: tipoDocumento,
-        items: itemsPayload,
-        observacion: observacion || null,
-        fecha: fechaCreacionDate ? fechaCreacionDate.toString() : null,
-        transporte: transporte || null,
-        modalidad_entrega: modalidadEntrega,
-        direccion_entrega: direccionEntrega || null,
-        direccion_entrega_id: direccionEntregaId,
-        sociedad: sociedad || null,
-        deposito_id: depositoId,
-        fecha_compromiso_pago: fechaCompromisoPago ? fechaCompromisoPago.toString() : null,
-        tipo_precio: tipoPrecio,
-        tipo_cliente: tipoCliente,
-        aplica_umbral_mayorista: aplicaUmbral,
-        vendedor_id: vendedorId,
-        reserva_stock: reservaStock,
-        forma_pago: formaPago || null,
-      })
+      await api.put(`/pedidos/${pedidoId}`, buildPedidoPutBody())
       // Finalizar es lo que saca al pedido de borrador y lo pone en la cola de
       // depósito. Un pedido que ya se finalizó antes se guarda y listo: volver a
       // moverlo de estado sería un error de transición.
@@ -1078,6 +1109,38 @@ export default function PedidoForm({
     }
   }
 
+  /**
+   * Guarda la cotización SIN confirmarla: sigue en borrador, y vuelve a la
+   * lista de Cotizaciones. El autosave ya persiste todo mientras se edita;
+   * esto sólo fuerza un último PUT (por si quedó algo en el debounce) y
+   * navega — no hay transición de estado que pueda fallar por falta de stock,
+   * así que no hace falta la validación de la excepción de precio.
+   */
+  const guardarCotizacion = async () => {
+    if (items.length === 0) {
+      toast.error('Debe agregar al menos un producto')
+      return
+    }
+    if (!depositoId) {
+      toast.error('Elegí el depósito del que sale el pedido')
+      return
+    }
+
+    setSaving(true)
+    try {
+      await api.put(`/pedidos/${pedidoId}`, buildPedidoPutBody())
+      toast.success('Cotización guardada')
+      router.push('/dashboard/cotizaciones')
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(typeof detail === 'string' ? detail : 'No se pudo guardar la cotización')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleFinalize = esCotizacionAhora ? guardarCotizacion : confirmarComoPedido
+
   return (
     <div className="space-y-6 pb-28">
       {/* Header */}
@@ -1093,7 +1156,9 @@ export default function PedidoForm({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-bold text-gray-900">
-                {isEditing ? `Editar Pedido - ${numeroPedido}` : `Nuevo Pedido - ${clienteNombre}`}
+                {esCotizacionAhora
+                  ? (isEditing ? `Editar Cotización - ${numeroPedido}` : `Nueva Cotización - ${clienteNombre}`)
+                  : (isEditing ? `Editar Pedido - ${numeroPedido}` : `Nuevo Pedido - ${clienteNombre}`)}
               </h1>
               {autoSaving && (
                 <span className="flex items-center gap-1.5 text-xs font-medium text-gray-400 animate-pulse">
@@ -1768,7 +1833,7 @@ export default function PedidoForm({
               className="inline-flex items-center gap-2 px-4 sm:px-6 py-2.5 text-sm font-semibold text-white bg-[#003087] rounded-lg hover:bg-[#002570] disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
             >
               {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-              Finalizar Pedido
+              {esCotizacionAhora ? 'Guardar Cotización' : 'Finalizar Pedido'}
             </button>
           </div>
         </div>

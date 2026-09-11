@@ -12,9 +12,12 @@ import ClientSelector from '@/components/ui/ClientSelector'
 
 interface NuevoPedidoWrapperProps {
   initialClienteId?: number
+  /** Con qué intención se abrió esta pantalla. Ver el prop homónimo en PedidoForm. */
+  modo?: 'pedido' | 'cotizacion'
 }
 
-export default function NuevoPedidoWrapper({ initialClienteId }: NuevoPedidoWrapperProps) {
+export default function NuevoPedidoWrapper({ initialClienteId, modo = 'pedido' }: NuevoPedidoWrapperProps) {
+  const esCotizacion = modo === 'cotizacion'
   const router = useRouter()
   const { user } = useAuth()
 
@@ -80,21 +83,21 @@ export default function NuevoPedidoWrapper({ initialClienteId }: NuevoPedidoWrap
             <ArrowLeft className="w-5 h-5 text-gray-600" />
           </button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Nuevo Pedido</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{esCotizacion ? 'Nueva Cotización' : 'Nuevo Pedido'}</h1>
             <p className="text-sm text-gray-500 mt-1">Selecciona un cliente para comenzar</p>
           </div>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <h2 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wider">Seleccionar Cliente</h2>
-          <ClientSelector 
+          <ClientSelector
             selectedClienteId={clienteId}
             onClientSelect={setClienteId}
           />
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center text-gray-500">
-          Seleccione un cliente para crear la cotización
+          {esCotizacion ? 'Seleccione un cliente para crear la cotización' : 'Seleccione un cliente para crear el pedido'}
         </div>
       </div>
     )
@@ -143,6 +146,7 @@ export default function NuevoPedidoWrapper({ initialClienteId }: NuevoPedidoWrap
         initialReservaStock={pedido.reserva_stock}
         initialFormaPago={pedido.forma_pago}
         shippingStatus={pedido.shipping_status}
+        modo={modo}
         initialItems={[]}
         isEditing={false}
         onCancel={handleCancel}

@@ -61,6 +61,11 @@ export default function EditarPedidoPage() {
     router.back()
   }
 
+  // El listado de Pedidos excluye los borradores (`excluir_borradores`), así
+  // que a un borrador sólo se llega editándolo desde Cotizaciones. El estado
+  // ya nos dice todo lo que necesitamos: no hace falta un query param acá.
+  const modo = pedido?.shipping_status === 'borrador' ? 'cotizacion' : 'pedido'
+
   if (loading || !pedido) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-3">
@@ -121,6 +126,7 @@ export default function EditarPedidoPage() {
       initialReservaStock={pedido.reserva_stock}
       initialFormaPago={pedido.forma_pago}
       shippingStatus={pedido.shipping_status}
+      modo={modo}
       initialItems={initialItems}
       isEditing={true}
       onCancel={handleCancel}

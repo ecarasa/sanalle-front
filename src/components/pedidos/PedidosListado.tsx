@@ -923,7 +923,12 @@ export default function PedidosListado({ modo = 'pedidos' }: { modo?: ModoListad
         </div>
         <button
           type="button"
-          onClick={() => router.push('/dashboard/pedidos/nuevo')}
+          // Desde Cotizaciones hay que decirle a la pantalla de alta con qué
+          // intención se abre: es lo que hace que el título, el botón de acción
+          // y el destino al terminar sean los de una cotización y no los de un
+          // pedido. Sin el query param, la misma ruta no tiene forma de saberlo
+          // — el borrador que arma cualquiera de las dos es idéntico.
+          onClick={() => router.push(esCotizaciones ? '/dashboard/pedidos/nuevo?modo=cotizacion' : '/dashboard/pedidos/nuevo')}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#003087] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#002570] transition-colors shadow-sm"
         >
           <Plus className="w-4 h-4" />
